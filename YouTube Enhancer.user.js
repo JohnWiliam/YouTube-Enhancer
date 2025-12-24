@@ -537,7 +537,7 @@
             // Se estiver em fullscreen E os controles estiverem visíveis, suba o relógio
             // A barra do YouTube tem aprox 48px + padding. 70px é um valor seguro.
             if (isFullscreen && areControlsVisible) {
-                finalBottom = baseMargin + 70; 
+                finalBottom = baseMargin + 110; 
             }
 
             this.clockElement.style.bottom = `${finalBottom}px`;
