@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      1.0.2
+// @version      1.0.3
 // @description  Reduz uso de CPU, personaliza layout, remove Shorts e adiciona relógio customizável com interface refinada.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
@@ -535,7 +535,7 @@
             let finalBottom = baseMargin;
 
             // Se estiver em fullscreen E os controles estiverem visíveis, suba o relógio
-            // A barra do YouTube tem aprox 48px + padding. 70px é um valor seguro.
+            // A barra do YouTube tem aprox 48px + padding. 110px é um valor excelente.
             if (isFullscreen && areControlsVisible) {
                 finalBottom = baseMargin + 110; 
             }
