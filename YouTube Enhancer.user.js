@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      2.0.0
+// @version      1.0.0
 // @description  Reduz uso de CPU, personaliza layout, remove Shorts e adiciona um relógio flutuante em tela cheia.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
