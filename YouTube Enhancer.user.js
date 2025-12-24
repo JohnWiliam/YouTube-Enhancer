@@ -14,7 +14,7 @@
 (function() {
     'use strict';
 
-    const FLAG = "__yt_enhancer_v1_2_1__";
+    const FLAG = "__yt_enhancer_v1_0_0__";
     if (window[FLAG]) return;
     window[FLAG] = true;
 
