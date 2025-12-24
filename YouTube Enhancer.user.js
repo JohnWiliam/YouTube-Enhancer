@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      1.0.1
+// @version      1.0.2
 // @description  Reduz uso de CPU, personaliza layout, remove Shorts e adiciona relógio customizável com interface refinada.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
@@ -456,26 +456,33 @@
             };
         }
     };
-
     // =======================================================
-    // 5. CLOCK MANAGER
+    // 5. CLOCK MANAGER (ATUALIZADO - DINÂMICO)
     // =======================================================
     const ClockManager = {
         clockElement: null,
         interval: null,
         config: null,
+        observer: null,
+        playerElement: null,
 
         init(config) {
             this.config = config;
             window.ClockManager = this;
+            this.playerElement = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+            
             this.createClock();
+            this.setupObserver();
+            
             document.addEventListener('fullscreenchange', this.handleFullscreen.bind(this));
+            // Fallback para verificar mudanças periodicamente (caso o observer falhe em algum edge case)
             setInterval(() => this.handleFullscreen(), 2000);
         },
 
         updateConfig(newConfig) {
             this.config = newConfig;
             this.updateStyle();
+            this.adjustPosition(); // Recalcula posição imediatamente ao mudar config
         },
 
         createClock() {
@@ -483,17 +490,57 @@
             
             const clock = document.createElement('div');
             clock.id = 'yt-enhancer-clock';
-            // Z-Index alto, font-weight 400 (normal)
+            // Adicionado transition para movimento suave
             clock.style.cssText = `
                 position: fixed; pointer-events: none; z-index: 2147483647;
                 font-family: "Roboto", sans-serif; font-weight: 400;
                 padding: 6px 14px;
                 text-shadow: 0 1px 3px rgba(0,0,0,0.8);
                 display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                transition: bottom 0.3s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s;
             `;
             document.body.appendChild(clock);
             this.clockElement = clock;
             this.updateStyle();
+        },
+
+        setupObserver() {
+            // Observa mudanças de classe no player para saber se os controles aparecem
+            if (!this.playerElement) return;
+
+            this.observer = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+                        this.adjustPosition();
+                    }
+                }
+            });
+
+            this.observer.observe(this.playerElement, {
+                attributes: true,
+                attributeFilter: ['class'] // Só nos importamos com as classes
+            });
+        },
+
+        adjustPosition() {
+            if (!this.clockElement || !this.playerElement) return;
+
+            // 'ytp-autohide' presente = controles ESCONDIDOS
+            // 'ytp-autohide' ausente = controles VISÍVEIS
+            // Verifica também se estamos em fullscreen, pois fora dele a lógica muda
+            const isFullscreen = document.fullscreenElement != null;
+            const areControlsVisible = !this.playerElement.classList.contains('ytp-autohide');
+            
+            const baseMargin = this.config.CLOCK_STYLE.margin;
+            let finalBottom = baseMargin;
+
+            // Se estiver em fullscreen E os controles estiverem visíveis, suba o relógio
+            // A barra do YouTube tem aprox 48px + padding. 70px é um valor seguro.
+            if (isFullscreen && areControlsVisible) {
+                finalBottom = baseMargin + 70; 
+            }
+
+            this.clockElement.style.bottom = `${finalBottom}px`;
         },
 
         updateStyle() {
@@ -509,9 +556,12 @@
             el.style.backgroundColor = `rgba(${hexToRgb(s.bgColor)}, ${s.bgOpacity})`;
             el.style.color = s.color;
             el.style.fontSize = `${s.fontSize}px`;
-            el.style.bottom = `${s.margin}px`;
             el.style.right = `${s.margin}px`;
-            el.style.borderRadius = `${s.borderRadius}px`; // Aplica o novo arredondamento
+            el.style.borderRadius = `${s.borderRadius}px`;
+            
+            // A propriedade 'bottom' agora é controlada principalmente pelo adjustPosition
+            // mas definimos o inicial aqui
+            this.adjustPosition();
         },
 
         updateTime() {
@@ -543,6 +593,7 @@
                 if (!this.clockElement) this.createClock();
                 this.clockElement.style.display = 'block';
                 this.updateTime();
+                this.adjustPosition(); // Garante posição correta ao entrar em fullscreen
                 
                 if (!this.interval) {
                     this.interval = setInterval(() => this.updateTime(), 1000);
