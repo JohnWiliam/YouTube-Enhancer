@@ -38,17 +38,17 @@
             CLOCK_STYLE: {
                 color: '#ffffff',
                 bgColor: '#000000',
-                bgOpacity: 0.8,
-                fontSize: 28,
+                bgOpacity: 0.4,
+                fontSize: 22,
                 margin: 30,
-                borderRadius: 12, // Novo padrão
+                borderRadius: 25, // Novo padrão
                 position: 'bottom-right'
             }
         },
 
         load: function() {
             try {
-                const saved = GM_getValue('YT_ENHANCER_CONFIG_V2', this.defaults);
+                const saved = GM_getValue('YT_ENHANCER_CONFIG_V1.0', this.defaults);
                 const config = { ...this.defaults, ...saved };
                 config.FEATURES = { ...this.defaults.FEATURES, ...(saved.FEATURES || {}) };
                 config.CLOCK_STYLE = { ...this.defaults.CLOCK_STYLE, ...(saved.CLOCK_STYLE || {}) };
@@ -62,7 +62,7 @@
         },
 
         save: function(config) {
-            GM_setValue('YT_ENHANCER_CONFIG_V2', config);
+            GM_setValue('YT_ENHANCER_CONFIG_V1.0', config);
         }
     };
 
@@ -99,7 +99,7 @@
                             <div class="options-list">
                                 <label class="feature-toggle">
                                     <div class="toggle-text">
-                                        <strong>Redução de CPU (v2)</strong>
+                                        <strong>Redução de CPU (V1.0)</strong>
                                         <span>Limita scripts em segundo plano</span>
                                     </div>
                                     <div class="toggle-switch">
