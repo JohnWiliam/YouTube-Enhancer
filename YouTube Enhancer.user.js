@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      1.0.5
+// @version      1.0.6
 // @description  Reduz uso de CPU, personaliza layout, remove Shorts e adiciona relógio customizável com interface refinada.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
@@ -91,7 +91,7 @@
 
                     <div class="tabs-nav">
                         <button class="tab-btn active" data-target="tab-features">🔧 Funcionalidades</button>
-                        <button class="tab-btn" data-target="tab-appearance">🎨 Aparência</button>
+                        <button class="tab-btn" data-target="tab-appearance">🎨 Aparência do relógio</button>
                     </div>
 
                     <div class="modal-content">
