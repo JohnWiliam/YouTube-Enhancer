@@ -2,7 +2,7 @@
 
 > **Otimize, Personalize e Domine sua experiência no YouTube.**
 
-![Version](https://img.shields.io/badge/Version-1.0.0-blue)
+![Version](https://img.shields.io/badge/Version-1.0.4-blue)
 ![Language](https://img.shields.io/badge/Language-JavaScript-F7DF1E?logo=javascript&logoColor=F7DF1E)
 ![Author](https://img.shields.io/badge/Author-John%20Wiliam%20%26%20IA-orange)
 [![Install](https://img.shields.io/badge/Install-Click_Here-green)](https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube%20Enhancer.user.js)
@@ -13,7 +13,7 @@ O **YouTube Enhancer** é um Userscript poderoso projetado para o ambiente **Vio
 
 ## ✨ Funcionalidades Principais
 
-### ⚡ 1. Otimização de Performance (CPU Tamer v2)
+### ⚡ 1. Otimização de Performance (CPU Tamer v1)
 O YouTube é conhecido por consumir muitos recursos. Este script implementa um **limitador inteligente**:
 * **Background Throttling:** Quando a aba do YouTube não está visível, o script reduz drasticamente a taxa de atualização de scripts em segundo plano (atraso de `5000ms`).
 * **Resultado:** Menos uso de processador, menos aquecimento e maior duração de bateria em laptops.
