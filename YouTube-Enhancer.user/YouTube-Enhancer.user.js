@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      1.0.0
+// @version      1.0.1
 // @description  Reduz uso de CPU, personaliza layout, remove Shorts e adiciona relógio customizável com interface refinada.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
@@ -17,7 +17,7 @@
 (function() {
     'use strict';
 
-    const FLAG = "__yt_enhancer_v1_0_0__";
+    const FLAG = "__yt_enhancer_v1_0_1__";
     if (window[FLAG]) return;
     window[FLAG] = true;
 
@@ -157,7 +157,7 @@
         },
 
         // MIGRAÇÃO DE CONFIGURAÇÕES - CRÍTICO 3
-        migrateConfig(savedConfig, currentVersion = '1.0.0') {
+        migrateConfig(savedConfig, currentVersion = '1.0.1') {
             if (!savedConfig || typeof savedConfig !== 'object') {
                 return null;
             }
@@ -190,11 +190,11 @@
     // 1. CONFIG MANAGER (COM MIGRAÇÃO)
     // =======================================================
     const ConfigManager = {
-        CONFIG_VERSION: '1.0.0',
+        CONFIG_VERSION: '1.0.1',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         
         defaults: {
-            version: '1.0.0',
+            version: '1.0.1',
             VIDEOS_PER_ROW: 5,
             FEATURES: {
                 CPU_TAMER: true,
@@ -202,7 +202,7 @@
                 SHORTS_REMOVAL: true,
                 FULLSCREEN_CLOCK: true
             },
-            CLOCK_MODE: 'forcado_on',
+            // CLOCK_MODE removido
             CLOCK_STYLE: {
                 color: '#ffffff',
                 bgColor: '#000000',
@@ -389,15 +389,6 @@
                                 <div class="control-group">
                                     <label>Arredondamento (px)</label>
                                     <input type="number" id="style-border-radius" min="0" max="50" value="${currentConfig.CLOCK_STYLE.borderRadius || 12}" class="styled-input">
-                                </div>
-
-                                <div class="control-group full-width">
-                                    <label>Modo de Ativação</label>
-                                    <select id="cfg-clock-mode" class="styled-select">
-                                        <option value="automatico" ${currentConfig.CLOCK_MODE === 'automatico' ? 'selected' : ''}>Automático (Dias úteis, 13-15h)</option>
-                                        <option value="forcado_on" ${currentConfig.CLOCK_MODE === 'forcado_on' ? 'selected' : ''}>Sempre Ligado</option>
-                                        <option value="forcado_off" ${currentConfig.CLOCK_MODE === 'forcado_off' ? 'selected' : ''}>Sempre Desligado</option>
-                                    </select>
                                 </div>
                             </div>
                         </div>
@@ -622,7 +613,7 @@
                             SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked,
                             FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked
                         },
-                        CLOCK_MODE: document.getElementById('cfg-clock-mode').value,
+                        // CLOCK_MODE removido daqui
                         CLOCK_STYLE: {
                             color: document.getElementById('style-color').value,
                             bgColor: document.getElementById('style-bg-color').value,
@@ -939,19 +930,9 @@
         },
         
         shouldShow() {
-            try {
-                const mode = this.config.CLOCK_MODE;
-                if (mode === 'forcado_off') return false;
-                if (mode === 'forcado_on') return true;
-                
-                const d = new Date();
-                const isWeekDay = d.getDay() >= 1 && d.getDay() <= 5;
-                const isTime = d.getHours() >= 13 && d.getHours() < 15;
-                return isWeekDay && isTime;
-            } catch (error) {
-                console.error('Should show error:', error);
-                return false;
-            }
+            // Simplificado: Se o toggle principal estiver ativo (verificado em handleFullscreen), 
+            // e estiver em tela cheia, o relógio deve aparecer.
+            return true;
         },
         
         handleFullscreen() {
