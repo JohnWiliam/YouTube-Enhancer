@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      1.0.1
+// @version      1.0.2
 // @description  Reduz uso de CPU, personaliza layout, remove Shorts e adiciona relógio customizável com interface refinada.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
@@ -17,7 +17,7 @@
 (function() {
     'use strict';
 
-    const FLAG = "__yt_enhancer_v1_0_1__";
+    const FLAG = "__yt_enhancer_v1_0_2__";
     if (window[FLAG]) return;
     window[FLAG] = true;
 
@@ -157,7 +157,7 @@
         },
 
         // MIGRAÇÃO DE CONFIGURAÇÕES - CRÍTICO 3
-        migrateConfig(savedConfig, currentVersion = '1.0.1') {
+        migrateConfig(savedConfig, currentVersion = '1.0.2') {
             if (!savedConfig || typeof savedConfig !== 'object') {
                 return null;
             }
@@ -182,6 +182,7 @@
             //     savedConfig.version = '1.0.1';
             // }
 
+
             return savedConfig;
         }
     };
@@ -190,11 +191,11 @@
     // 1. CONFIG MANAGER (COM MIGRAÇÃO)
     // =======================================================
     const ConfigManager = {
-        CONFIG_VERSION: '1.0.1',
+        CONFIG_VERSION: '1.0.2',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         
         defaults: {
-            version: '1.0.1',
+            version: '1.0.2',
             VIDEOS_PER_ROW: 5,
             FEATURES: {
                 CPU_TAMER: true,
@@ -202,7 +203,6 @@
                 SHORTS_REMOVAL: true,
                 FULLSCREEN_CLOCK: true
             },
-            // CLOCK_MODE removido
             CLOCK_STYLE: {
                 color: '#ffffff',
                 bgColor: '#000000',
@@ -395,8 +395,8 @@
                     </div>
 
                     <div class="modal-footer">
-                        <button id="yt-enhancer-apply" class="btn btn-secondary">Aplicar</button>
-                        <button id="yt-enhancer-save" class="btn btn-primary">Salvar e Recarregar</button>
+                        <button id="yt-enhancer-apply" class="btn btn-primary">Aplicar</button>
+                        <button id="yt-enhancer-reload" class="btn btn-primary" style="display: none;">Aplicar e Recarregar</button>
                     </div>
                 </div>
 
@@ -613,7 +613,6 @@
                             SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked,
                             FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked
                         },
-                        // CLOCK_MODE removido daqui
                         CLOCK_STYLE: {
                             color: document.getElementById('style-color').value,
                             bgColor: document.getElementById('style-bg-color').value,
@@ -630,10 +629,38 @@
                 }
             };
 
-            // Apply button
+            // LÓGICA INTELIGENTE DOS BOTÕES (Novo em v1.0.2)
+            const initialCpuTamerState = currentConfig.FEATURES.CPU_TAMER;
+            const cpuToggle = document.getElementById('cfg-cpu-tamer');
+            const btnApply = document.getElementById('yt-enhancer-apply');
+            const btnReload = document.getElementById('yt-enhancer-reload');
+
+            const updateButtonState = () => {
+                try {
+                    // Se o estado do CPU Tamer for diferente do inicial, exige reload
+                    const isCpuChanged = cpuToggle.checked !== initialCpuTamerState;
+                    
+                    if (isCpuChanged) {
+                        btnApply.style.display = 'none';
+                        btnReload.style.display = 'block';
+                    } else {
+                        btnApply.style.display = 'block';
+                        btnReload.style.display = 'none';
+                    }
+                } catch (error) {
+                    console.error('Button update error:', error);
+                }
+            };
+
+            // Listener para detectar mudança na opção crítica
+            this.cleanupFunctions.push(
+                Utils.safeAddEventListener(cpuToggle, 'change', updateButtonState)
+            );
+
+            // Apply button (Sem reload)
             this.cleanupFunctions.push(
                 Utils.safeAddEventListener(
-                    document.getElementById('yt-enhancer-apply'),
+                    btnApply,
                     'click',
                     () => {
                         try {
@@ -647,10 +674,10 @@
                 )
             );
 
-            // Save button
+            // Reload button (Com reload)
             this.cleanupFunctions.push(
                 Utils.safeAddEventListener(
-                    document.getElementById('yt-enhancer-save'),
+                    btnReload,
                     'click',
                     () => {
                         try {
@@ -659,7 +686,7 @@
                             closeModal();
                             setTimeout(() => window.location.reload(), 100);
                         } catch (error) {
-                            console.error('Save button error:', error);
+                            console.error('Reload button error:', error);
                         }
                     }
                 )
@@ -930,8 +957,6 @@
         },
         
         shouldShow() {
-            // Simplificado: Se o toggle principal estiver ativo (verificado em handleFullscreen), 
-            // e estiver em tela cheia, o relógio deve aparecer.
             return true;
         },
         
