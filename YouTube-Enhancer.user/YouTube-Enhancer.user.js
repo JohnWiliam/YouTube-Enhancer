@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         YouTube Enhancer 2
+// @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
 // @version      1.0.0
 // @description  Reduz uso de CPU, personaliza layout, remove Shorts e adiciona relógio customizável com interface refinada.
