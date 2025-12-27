@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      1.0.6
+// @version      1.0.7
 // @description  Reduz uso de CPU, personaliza layout, remove Shorts e adiciona relógio customizável com interface refinada.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
@@ -24,10 +24,177 @@
     const log = (msg) => console.log(`[YT Enhancer] ${msg}`);
 
     // =======================================================
-    // 1. CONFIG MANAGER
+    // EVENT BUS SYSTEM - ALTA PRIORIDADE 1
+    // =======================================================
+    const EventBus = {
+        events: new Map(),
+        
+        on(event, callback) {
+            if (!this.events.has(event)) {
+                this.events.set(event, []);
+            }
+            this.events.get(event).push(callback);
+            return () => this.off(event, callback);
+        },
+        
+        off(event, callback) {
+            if (!this.events.has(event)) return;
+            const callbacks = this.events.get(event);
+            const index = callbacks.indexOf(callback);
+            if (index > -1) callbacks.splice(index, 1);
+        },
+        
+        emit(event, data) {
+            if (!this.events.has(event)) return;
+            const callbacks = [...this.events.get(event)];
+            for (const callback of callbacks) {
+                try {
+                    callback(data);
+                } catch (error) {
+                    console.error(`EventBus error in ${event}:`, error);
+                }
+            }
+        }
+    };
+
+    // =======================================================
+    // UTILITÁRIOS
+    // =======================================================
+    const Utils = {
+        // DEBOUNCE - ALTA PRIORIDADE 2
+        debounce(func, wait, immediate = false) {
+            let timeout;
+            return function(...args) {
+                const context = this;
+                const later = () => {
+                    timeout = null;
+                    if (!immediate) func.apply(context, args);
+                };
+                const callNow = immediate && !timeout;
+                clearTimeout(timeout);
+                timeout = setTimeout(later, wait);
+                if (callNow) func.apply(context, args);
+            };
+        },
+
+        // CACHE DE DOM - ALTA PRIORIDADE 3
+        DOMCache: {
+            cache: new Map(),
+            observers: new Map(),
+            
+            get(selector, forceUpdate = false) {
+                if (forceUpdate || !this.cache.has(selector)) {
+                    const element = document.querySelector(selector);
+                    this.cache.set(selector, element);
+                    return element;
+                }
+                return this.cache.get(selector);
+            },
+            
+            getAll(selector, forceUpdate = false) {
+                if (forceUpdate || !this.cache.has(`all:${selector}`)) {
+                    const elements = document.querySelectorAll(selector);
+                    this.cache.set(`all:${selector}`, elements);
+                    return elements;
+                }
+                return this.cache.get(`all:${selector}`);
+            },
+            
+            refresh(selector = null) {
+                if (selector) {
+                    this.cache.delete(selector);
+                    this.cache.delete(`all:${selector}`);
+                } else {
+                    this.cache.clear();
+                }
+            },
+            
+            observe(selector, callback, options = {}) {
+                const observer = new MutationObserver(
+                    Utils.debounce(callback, 100)
+                );
+                const element = this.get(selector);
+                if (element) {
+                    observer.observe(element, {
+                        childList: true,
+                        subtree: true,
+                        attributes: true,
+                        ...options
+                    });
+                    this.observers.set(selector, observer);
+                }
+                return observer;
+            },
+            
+            disconnect(selector) {
+                if (this.observers.has(selector)) {
+                    this.observers.get(selector).disconnect();
+                    this.observers.delete(selector);
+                }
+            }
+        },
+
+        // TRATAMENTO SEGURO DE EVENT LISTENERS - CRÍTICO 2
+        safeAddEventListener(element, event, handler, options = {}) {
+            if (!element) {
+                log(`Element not found for event: ${event}`);
+                return () => {};
+            }
+            
+            const safeHandler = (e) => {
+                try {
+                    return handler(e);
+                } catch (error) {
+                    console.error(`Error in ${event} handler:`, error);
+                    return null;
+                }
+            };
+            
+            element.addEventListener(event, safeHandler, options);
+            
+            // Retorna função de cleanup
+            return () => element.removeEventListener(event, safeHandler, options);
+        },
+
+        // MIGRAÇÃO DE CONFIGURAÇÕES - CRÍTICO 3
+        migrateConfig(savedConfig, currentVersion = '1.0.0') {
+            if (!savedConfig || typeof savedConfig !== 'object') {
+                return null;
+            }
+
+            // Se não tem versão, é da versão inicial
+            if (!savedConfig.version) {
+                savedConfig.version = '1.0.0';
+                // Adicionar propriedades que podem estar faltando
+                if (!savedConfig.CLOCK_STYLE?.borderRadius) {
+                    savedConfig.CLOCK_STYLE = {
+                        ...savedConfig.CLOCK_STYLE,
+                        borderRadius: 12
+                    };
+                }
+            }
+
+            // Aqui podemos adicionar mais lógicas de migração
+            // Exemplo: se savedConfig.version === '1.0.0' e currentVersion === '1.0.1'
+            // if (savedConfig.version === '1.0.0') {
+            //     // Migrar de 1.0.0 para 1.0.1
+            //     savedConfig.newProperty = 'default';
+            //     savedConfig.version = '1.0.1';
+            // }
+
+            return savedConfig;
+        }
+    };
+
+    // =======================================================
+    // 1. CONFIG MANAGER (COM MIGRAÇÃO)
     // =======================================================
     const ConfigManager = {
+        CONFIG_VERSION: '1.0.0',
+        STORAGE_KEY: 'YT_ENHANCER_CONFIG',
+        
         defaults: {
+            version: '1.0.0',
             VIDEOS_PER_ROW: 5,
             FEATURES: {
                 CPU_TAMER: true,
@@ -42,38 +209,74 @@
                 bgOpacity: 0.4,
                 fontSize: 22,
                 margin: 30,
-                borderRadius: 25, // Novo padrão
+                borderRadius: 25,
                 position: 'bottom-right'
             }
         },
 
         load: function() {
             try {
-                const saved = GM_getValue('YT_ENHANCER_CONFIG_V1.0', this.defaults);
-                const config = { ...this.defaults, ...saved };
-                config.FEATURES = { ...this.defaults.FEATURES, ...(saved.FEATURES || {}) };
-                config.CLOCK_STYLE = { ...this.defaults.CLOCK_STYLE, ...(saved.CLOCK_STYLE || {}) };
+                const saved = GM_getValue(this.STORAGE_KEY);
                 
+                // Aplicar migração se necessário
+                const migratedConfig = Utils.migrateConfig(saved, this.CONFIG_VERSION);
+                
+                if (!migratedConfig) {
+                    log('Usando configurações padrão');
+                    return { ...this.defaults };
+                }
+                
+                // Mesclar com defaults garantindo novas propriedades
+                const config = { ...this.defaults, ...migratedConfig };
+                config.FEATURES = { ...this.defaults.FEATURES, ...(migratedConfig.FEATURES || {}) };
+                config.CLOCK_STYLE = { 
+                    ...this.defaults.CLOCK_STYLE, 
+                    ...(migratedConfig.CLOCK_STYLE || {}) 
+                };
+                
+                // Validações
                 config.VIDEOS_PER_ROW = Math.max(3, Math.min(8, config.VIDEOS_PER_ROW));
+                config.CLOCK_STYLE.bgOpacity = Math.max(0, Math.min(1, config.CLOCK_STYLE.bgOpacity));
+                config.CLOCK_STYLE.fontSize = Math.max(12, Math.min(100, config.CLOCK_STYLE.fontSize));
+                config.CLOCK_STYLE.margin = Math.max(0, Math.min(200, config.CLOCK_STYLE.margin));
+                config.CLOCK_STYLE.borderRadius = Math.max(0, Math.min(50, config.CLOCK_STYLE.borderRadius));
+                
                 return config;
-            } catch (e) {
-                log('Erro ao carregar config: ' + e);
-                return this.defaults;
+            } catch (error) {
+                log('Erro ao carregar configuração: ' + error);
+                return { ...this.defaults };
             }
         },
 
         save: function(config) {
-            GM_setValue('YT_ENHANCER_CONFIG_V1.0', config);
+            try {
+                // Garantir que tem a versão atual
+                config.version = this.CONFIG_VERSION;
+                GM_setValue(this.STORAGE_KEY, config);
+                EventBus.emit('configChanged', config);
+                return true;
+            } catch (error) {
+                log('Erro ao salvar configuração: ' + error);
+                return false;
+            }
         }
     };
 
     // =======================================================
-    // 2. UI MANAGER
+    // 2. UI MANAGER (COM EVENT BUS)
     // =======================================================
     const UIManager = {
+        cleanupFunctions: [],
+        
         createSettingsModal: function(currentConfig, onSave) {
+            // Limpar listeners anteriores
+            this.cleanupFunctions.forEach(fn => fn());
+            this.cleanupFunctions = [];
+            
             const oldModal = document.getElementById('yt-enhancer-settings-modal');
+            const oldOverlay = document.getElementById('yt-enhancer-overlay');
             if (oldModal) oldModal.remove();
+            if (oldOverlay) oldOverlay.remove();
 
             const overlay = document.createElement('div');
             overlay.id = 'yt-enhancer-overlay';
@@ -220,13 +423,11 @@
                     }
 
                     /* REMOVE SPINNERS (SETAS) DOS INPUTS */
-                    /* Chrome, Safari, Edge, Opera */
                     input::-webkit-outer-spin-button,
                     input::-webkit-inner-spin-button {
                       -webkit-appearance: none;
                       margin: 0;
                     }
-                    /* Firefox */
                     input[type=number] {
                       -moz-appearance: textfield;
                     }
@@ -339,82 +540,155 @@
             document.body.appendChild(overlay);
             document.body.insertAdjacentHTML('beforeend', modalHTML);
 
-            // --- Lógica UI ---
+            // --- Lógica UI com tratamento seguro ---
             const closeModal = () => {
-                document.getElementById('yt-enhancer-settings-modal').remove();
-                overlay.remove();
+                const modal = document.getElementById('yt-enhancer-settings-modal');
+                const overlay = document.getElementById('yt-enhancer-overlay');
+                if (modal) modal.remove();
+                if (overlay) overlay.remove();
+                this.cleanupFunctions.forEach(fn => fn());
+                this.cleanupFunctions = [];
             };
-            overlay.addEventListener('click', closeModal);
-            document.getElementById('yt-enhancer-close').addEventListener('click', closeModal);
 
+            // Adicionar listeners com tratamento seguro
+            this.cleanupFunctions.push(
+                Utils.safeAddEventListener(overlay, 'click', closeModal)
+            );
+            
+            this.cleanupFunctions.push(
+                Utils.safeAddEventListener(
+                    document.getElementById('yt-enhancer-close'),
+                    'click',
+                    closeModal
+                )
+            );
+
+            // Tabs
             document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-                    btn.classList.add('active');
-                    document.getElementById(btn.dataset.target).classList.add('active');
-                });
+                this.cleanupFunctions.push(
+                    Utils.safeAddEventListener(btn, 'click', () => {
+                        try {
+                            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                            document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+                            btn.classList.add('active');
+                            document.getElementById(btn.dataset.target).classList.add('active');
+                        } catch (error) {
+                            console.error('Tab switch error:', error);
+                        }
+                    })
+                );
             });
 
-            document.getElementById('cfg-layout').addEventListener('change', (e) => {
-                document.getElementById('layout-settings').style.display = e.target.checked ? 'flex' : 'none';
-            });
+            // Layout toggle
+            this.cleanupFunctions.push(
+                Utils.safeAddEventListener(
+                    document.getElementById('cfg-layout'),
+                    'change',
+                    (e) => {
+                        try {
+                            const display = e.target.checked ? 'flex' : 'none';
+                            document.getElementById('layout-settings').style.display = display;
+                        } catch (error) {
+                            console.error('Layout toggle error:', error);
+                        }
+                    }
+                )
+            );
 
+            // Color inputs
             ['style-color', 'style-bg-color'].forEach(id => {
-                document.getElementById(id).addEventListener('input', (e) => {
-                    e.target.nextElementSibling.textContent = e.target.value;
-                });
+                this.cleanupFunctions.push(
+                    Utils.safeAddEventListener(
+                        document.getElementById(id),
+                        'input',
+                        (e) => {
+                            try {
+                                e.target.nextElementSibling.textContent = e.target.value;
+                            } catch (error) {
+                                console.error('Color input error:', error);
+                            }
+                        }
+                    )
+                );
             });
 
             const getNewConfig = () => {
-                return {
-                    VIDEOS_PER_ROW: parseInt(document.getElementById('cfg-videos-row').value) || 5,
-                    FEATURES: {
-                        CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
-                        LAYOUT_ENHANCEMENT: document.getElementById('cfg-layout').checked,
-                        SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked,
-                        FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked
-                    },
-                    CLOCK_MODE: document.getElementById('cfg-clock-mode').value,
-                    CLOCK_STYLE: {
-                        color: document.getElementById('style-color').value,
-                        bgColor: document.getElementById('style-bg-color').value,
-                        bgOpacity: parseFloat(document.getElementById('style-bg-opacity').value),
-                        fontSize: parseInt(document.getElementById('style-font-size').value),
-                        margin: parseInt(document.getElementById('style-margin').value),
-                        borderRadius: parseInt(document.getElementById('style-border-radius').value), // Coleta do novo valor
-                        position: 'bottom-right'
-                    }
-                };
+                try {
+                    return {
+                        VIDEOS_PER_ROW: parseInt(document.getElementById('cfg-videos-row').value) || 5,
+                        FEATURES: {
+                            CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
+                            LAYOUT_ENHANCEMENT: document.getElementById('cfg-layout').checked,
+                            SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked,
+                            FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked
+                        },
+                        CLOCK_MODE: document.getElementById('cfg-clock-mode').value,
+                        CLOCK_STYLE: {
+                            color: document.getElementById('style-color').value,
+                            bgColor: document.getElementById('style-bg-color').value,
+                            bgOpacity: parseFloat(document.getElementById('style-bg-opacity').value),
+                            fontSize: parseInt(document.getElementById('style-font-size').value),
+                            margin: parseInt(document.getElementById('style-margin').value),
+                            borderRadius: parseInt(document.getElementById('style-border-radius').value),
+                            position: 'bottom-right'
+                        }
+                    };
+                } catch (error) {
+                    console.error('Error getting new config:', error);
+                    return currentConfig;
+                }
             };
 
-            document.getElementById('yt-enhancer-apply').addEventListener('click', () => {
-                const cfg = getNewConfig();
-                onSave(cfg);
-                
-                Object.assign(currentConfig, cfg);
-                StyleManager.apply(currentConfig);
-                if(window.ClockManager) {
-                    window.ClockManager.updateConfig(currentConfig);
-                    window.ClockManager.handleFullscreen();
-                }
-                closeModal();
-            });
+            // Apply button
+            this.cleanupFunctions.push(
+                Utils.safeAddEventListener(
+                    document.getElementById('yt-enhancer-apply'),
+                    'click',
+                    () => {
+                        try {
+                            const cfg = getNewConfig();
+                            onSave(cfg);
+                            closeModal();
+                        } catch (error) {
+                            console.error('Apply button error:', error);
+                        }
+                    }
+                )
+            );
 
-            document.getElementById('yt-enhancer-save').addEventListener('click', () => {
-                onSave(getNewConfig());
-                closeModal();
-                window.location.reload();
-            });
+            // Save button
+            this.cleanupFunctions.push(
+                Utils.safeAddEventListener(
+                    document.getElementById('yt-enhancer-save'),
+                    'click',
+                    () => {
+                        try {
+                            const cfg = getNewConfig();
+                            onSave(cfg);
+                            closeModal();
+                            setTimeout(() => window.location.reload(), 100);
+                        } catch (error) {
+                            console.error('Save button error:', error);
+                        }
+                    }
+                )
+            );
         }
     };
 
     // =======================================================
-    // 3. STYLE MANAGER
+    // 3. STYLE MANAGER (COM EVENT BUS)
     // =======================================================
     const StyleManager = {
         styleId: 'yt-enhancer-styles',
+        currentConfig: null,
+        
+        init() {
+            EventBus.on('configChanged', (config) => this.apply(config));
+        },
+        
         apply: function(config) {
+            this.currentConfig = config;
             const old = document.getElementById(this.styleId);
             if (old) old.remove();
 
@@ -423,8 +697,14 @@
             let css = '';
             if (config.FEATURES.LAYOUT_ENHANCEMENT) {
                 css += `
-                    ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${config.VIDEOS_PER_ROW} !important; }
-                    @media (max-width: 1200px) { ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${Math.min(config.VIDEOS_PER_ROW, 4)} !important; } }
+                    ytd-rich-grid-renderer { 
+                        --ytd-rich-grid-items-per-row: ${config.VIDEOS_PER_ROW} !important; 
+                    }
+                    @media (max-width: 1200px) { 
+                        ytd-rich-grid-renderer { 
+                            --ytd-rich-grid-items-per-row: ${Math.min(config.VIDEOS_PER_ROW, 4)} !important; 
+                        } 
+                    }
                 `;
             }
             if (config.FEATURES.SHORTS_REMOVAL) {
@@ -433,7 +713,9 @@
                     ytd-reel-shelf-renderer,
                     ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]),
                     ytd-guide-entry-renderer:has(a[title="Shorts"]),
-                    ytd-mini-guide-entry-renderer[aria-label="Shorts"] { display: none !important; }
+                    ytd-mini-guide-entry-renderer[aria-label="Shorts"] { 
+                        display: none !important; 
+                    }
                 `;
             }
 
@@ -445,20 +727,74 @@
     };
 
     // =======================================================
-    // 4. CPU TAMER
+    // 4. CPU TAMER SEGURO - CRÍTICO 1
     // =======================================================
     const CpuTamer = {
+        originalTimers: {
+            setInterval: null,
+            setTimeout: null
+        },
+        
+        isInitialized: false,
+        criticalTimers: new Set(),
+        
         init() {
-            const originalSetInterval = window.setInterval;
-            window.setInterval = (cb, time, ...args) => {
-                let delay = time;
-                if (document.visibilityState === 'hidden') delay = Math.max(time, 5000);
-                return originalSetInterval(cb, delay, ...args);
+            if (this.isInitialized) return;
+            
+            // Guardar originais
+            this.originalTimers.setInterval = window.setInterval;
+            this.originalTimers.setTimeout = window.setTimeout;
+            
+            // Wrapper seguro para setInterval
+            window.setInterval = (callback, delay, ...args) => {
+                const isCritical = this.criticalTimers.has(callback);
+                let actualDelay = delay;
+                
+                if (!isCritical && document.visibilityState === 'hidden') {
+                    actualDelay = Math.max(delay, 2000); // Mínimo 2s em background
+                }
+                
+                return this.originalTimers.setInterval(callback, actualDelay, ...args);
             };
+            
+            // Wrapper para setTimeout também
+            window.setTimeout = (callback, delay, ...args) => {
+                const isCritical = this.criticalTimers.has(callback);
+                let actualDelay = delay;
+                
+                if (!isCritical && document.visibilityState === 'hidden') {
+                    actualDelay = Math.max(delay, 1000);
+                }
+                
+                return this.originalTimers.setTimeout(callback, actualDelay, ...args);
+            };
+            
+            this.isInitialized = true;
+            log('CPU Tamer inicializado (modo seguro)');
+        },
+        
+        markCritical(callback) {
+            if (typeof callback === 'function') {
+                this.criticalTimers.add(callback);
+            }
+        },
+        
+        unmarkCritical(callback) {
+            this.criticalTimers.delete(callback);
+        },
+        
+        cleanup() {
+            if (this.isInitialized) {
+                window.setInterval = this.originalTimers.setInterval;
+                window.setTimeout = this.originalTimers.setTimeout;
+                this.isInitialized = false;
+                this.criticalTimers.clear();
+            }
         }
     };
+
     // =======================================================
-    // 5. CLOCK MANAGER (ATUALIZADO - DINÂMICO)
+    // 5. CLOCK MANAGER (COM DEBOUNCE E CACHE)
     // =======================================================
     const ClockManager = {
         clockElement: null,
@@ -466,32 +802,48 @@
         config: null,
         observer: null,
         playerElement: null,
-
+        cleanupFunctions: [],
+        
         init(config) {
             this.config = config;
             window.ClockManager = this;
-            this.playerElement = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+            
+            // Usar cache de DOM
+            this.playerElement = Utils.DOMCache.get('#movie_player') || 
+                                Utils.DOMCache.get('.html5-video-player');
             
             this.createClock();
             this.setupObserver();
             
-            document.addEventListener('fullscreenchange', this.handleFullscreen.bind(this));
-            // Fallback para verificar mudanças periodicamente (caso o observer falhe em algum edge case)
-            setInterval(() => this.handleFullscreen(), 2000);
+            // Usar Event Bus
+            EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
+            
+            // Listeners com tratamento seguro
+            this.cleanupFunctions.push(
+                Utils.safeAddEventListener(
+                    document,
+                    'fullscreenchange',
+                    Utils.debounce(() => this.handleFullscreen(), 100)
+                )
+            );
+            
+            // Fallback com intervalo seguro
+            this.interval = setInterval(() => this.handleFullscreen(), 2000);
+            
+            log('Clock Manager inicializado');
         },
-
+        
         updateConfig(newConfig) {
             this.config = newConfig;
             this.updateStyle();
-            this.adjustPosition(); // Recalcula posição imediatamente ao mudar config
+            this.adjustPosition();
         },
-
+        
         createClock() {
             if (document.getElementById('yt-enhancer-clock')) return;
             
             const clock = document.createElement('div');
             clock.id = 'yt-enhancer-clock';
-            // Adicionado transition para movimento suave
             clock.style.cssText = `
                 position: fixed; pointer-events: none; z-index: 2147483647;
                 font-family: "Roboto", sans-serif; font-weight: 400;
@@ -504,130 +856,199 @@
             this.clockElement = clock;
             this.updateStyle();
         },
-
+        
         setupObserver() {
-            // Observa mudanças de classe no player para saber se os controles aparecem
+            // Observar mudanças no player com debounce
             if (!this.playerElement) return;
 
-            this.observer = new MutationObserver((mutations) => {
-                for (const mutation of mutations) {
-                    if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
+            this.observer = new MutationObserver(
+                Utils.debounce(() => {
+                    try {
                         this.adjustPosition();
+                    } catch (error) {
+                        console.error('Observer error:', error);
                     }
-                }
-            });
+                }, 150)
+            );
 
             this.observer.observe(this.playerElement, {
                 attributes: true,
-                attributeFilter: ['class'] // Só nos importamos com as classes
+                attributeFilter: ['class'],
+                childList: false,
+                subtree: false
             });
         },
-
+        
         adjustPosition() {
             if (!this.clockElement || !this.playerElement) return;
 
-            // 'ytp-autohide' presente = controles ESCONDIDOS
-            // 'ytp-autohide' ausente = controles VISÍVEIS
-            // Verifica também se estamos em fullscreen, pois fora dele a lógica muda
-            const isFullscreen = document.fullscreenElement != null;
-            const areControlsVisible = !this.playerElement.classList.contains('ytp-autohide');
-            
-            const baseMargin = this.config.CLOCK_STYLE.margin;
-            let finalBottom = baseMargin;
+            try {
+                const isFullscreen = document.fullscreenElement != null;
+                const areControlsVisible = !this.playerElement.classList.contains('ytp-autohide');
+                const baseMargin = this.config.CLOCK_STYLE.margin;
+                let finalBottom = baseMargin;
 
-            // Se estiver em fullscreen E os controles estiverem visíveis, suba o relógio
-            // A barra do YouTube tem aprox 48px + padding. 110px é um valor excelente.
-            if (isFullscreen && areControlsVisible) {
-                finalBottom = baseMargin + 110; 
+                if (isFullscreen && areControlsVisible) {
+                    finalBottom = baseMargin + 110;
+                }
+
+                this.clockElement.style.bottom = `${finalBottom}px`;
+            } catch (error) {
+                console.error('Adjust position error:', error);
             }
-
-            this.clockElement.style.bottom = `${finalBottom}px`;
         },
-
+        
         updateStyle() {
             if (!this.clockElement) return;
-            const s = this.config.CLOCK_STYLE;
-            const el = this.clockElement;
             
-            const hexToRgb = (hex) => {
-                const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-                return result ? `${parseInt(result[1],16)},${parseInt(result[2],16)},${parseInt(result[3],16)}` : '0,0,0';
-            };
+            try {
+                const s = this.config.CLOCK_STYLE;
+                const el = this.clockElement;
+                
+                const hexToRgb = (hex) => {
+                    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                    return result ? 
+                        `${parseInt(result[1],16)},${parseInt(result[2],16)},${parseInt(result[3],16)}` : 
+                        '0,0,0';
+                };
 
-            el.style.backgroundColor = `rgba(${hexToRgb(s.bgColor)}, ${s.bgOpacity})`;
-            el.style.color = s.color;
-            el.style.fontSize = `${s.fontSize}px`;
-            el.style.right = `${s.margin}px`;
-            el.style.borderRadius = `${s.borderRadius}px`;
-            
-            // A propriedade 'bottom' agora é controlada principalmente pelo adjustPosition
-            // mas definimos o inicial aqui
-            this.adjustPosition();
+                el.style.backgroundColor = `rgba(${hexToRgb(s.bgColor)}, ${s.bgOpacity})`;
+                el.style.color = s.color;
+                el.style.fontSize = `${s.fontSize}px`;
+                el.style.right = `${s.margin}px`;
+                el.style.borderRadius = `${s.borderRadius}px`;
+                
+                this.adjustPosition();
+            } catch (error) {
+                console.error('Update style error:', error);
+            }
         },
-
+        
         updateTime() {
             if (!this.clockElement) return;
-            const now = new Date();
-            this.clockElement.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        },
-
-        shouldShow() {
-            const mode = this.config.CLOCK_MODE;
-            if (mode === 'forcado_off') return false;
-            if (mode === 'forcado_on') return true;
             
-            const d = new Date();
-            const isWeekDay = d.getDay() >= 1 && d.getDay() <= 5;
-            const isTime = d.getHours() >= 13 && d.getHours() < 15;
-            return isWeekDay && isTime;
+            try {
+                const now = new Date();
+                this.clockElement.textContent = now.toLocaleTimeString([], { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                });
+            } catch (error) {
+                console.error('Update time error:', error);
+            }
         },
-
+        
+        shouldShow() {
+            try {
+                const mode = this.config.CLOCK_MODE;
+                if (mode === 'forcado_off') return false;
+                if (mode === 'forcado_on') return true;
+                
+                const d = new Date();
+                const isWeekDay = d.getDay() >= 1 && d.getDay() <= 5;
+                const isTime = d.getHours() >= 13 && d.getHours() < 15;
+                return isWeekDay && isTime;
+            } catch (error) {
+                console.error('Should show error:', error);
+                return false;
+            }
+        },
+        
         handleFullscreen() {
             if (!this.config.FEATURES.FULLSCREEN_CLOCK) {
                 if (this.clockElement) this.clockElement.style.display = 'none';
                 return;
             }
 
-            const isFullscreen = document.fullscreenElement != null;
-            
-            if (isFullscreen && this.shouldShow()) {
-                if (!this.clockElement) this.createClock();
-                this.clockElement.style.display = 'block';
-                this.updateTime();
-                this.adjustPosition(); // Garante posição correta ao entrar em fullscreen
+            try {
+                const isFullscreen = document.fullscreenElement != null;
                 
-                if (!this.interval) {
-                    this.interval = setInterval(() => this.updateTime(), 1000);
+                if (isFullscreen && this.shouldShow()) {
+                    if (!this.clockElement) this.createClock();
+                    this.clockElement.style.display = 'block';
+                    this.updateTime();
+                    this.adjustPosition();
+                    
+                    if (!this.interval) {
+                        this.interval = setInterval(() => this.updateTime(), 1000);
+                    }
+                } else {
+                    if (this.clockElement) this.clockElement.style.display = 'none';
+                    if (this.interval) {
+                        clearInterval(this.interval);
+                        this.interval = null;
+                    }
                 }
-            } else {
-                if (this.clockElement) this.clockElement.style.display = 'none';
-                if (this.interval) {
-                    clearInterval(this.interval);
-                    this.interval = null;
-                }
+            } catch (error) {
+                console.error('Handle fullscreen error:', error);
             }
+        },
+        
+        cleanup() {
+            if (this.observer) this.observer.disconnect();
+            if (this.interval) clearInterval(this.interval);
+            this.cleanupFunctions.forEach(fn => fn());
+            this.cleanupFunctions = [];
         }
     };
 
     // =======================================================
-    // MAIN
+    // MAIN (COM EVENT BUS)
     // =======================================================
     function init() {
-        const config = ConfigManager.load();
-        
-        if (config.FEATURES.CPU_TAMER) CpuTamer.init();
-        
-        GM_registerMenuCommand('⚙️ Configurações', () => {
-            UIManager.createSettingsModal(config, ConfigManager.save);
-        });
-        
-        StyleManager.apply(config);
-        ClockManager.init(config);
-        
-        log('v1.0.0 Inicializado');
+        try {
+            const config = ConfigManager.load();
+            
+            // Inicializar módulos
+            if (config.FEATURES.CPU_TAMER) {
+                CpuTamer.init();
+            }
+            
+            // Registrar comando de menu
+            GM_registerMenuCommand('⚙️ Configurações', () => {
+                UIManager.createSettingsModal(config, (newConfig) => {
+                    ConfigManager.save(newConfig);
+                });
+            });
+            
+            // Inicializar managers que usam Event Bus
+            StyleManager.init();
+            ClockManager.init(config);
+            
+            // Aplicar configuração inicial
+            StyleManager.apply(config);
+            
+            // Configurar listeners para alterações dinâmicas
+            EventBus.on('configChanged', (newConfig) => {
+                try {
+                    if (newConfig.FEATURES.CPU_TAMER && !CpuTamer.isInitialized) {
+                        CpuTamer.init();
+                    } else if (!newConfig.FEATURES.CPU_TAMER && CpuTamer.isInitialized) {
+                        CpuTamer.cleanup();
+                    }
+                } catch (error) {
+                    console.error('Config change error:', error);
+                }
+            });
+            
+            log(`v${ConfigManager.CONFIG_VERSION} Inicializado com Event Bus`);
+            
+            // Cleanup quando a página descarregar
+            Utils.safeAddEventListener(window, 'beforeunload', () => {
+                CpuTamer.cleanup();
+                ClockManager.cleanup();
+                Utils.DOMCache.refresh();
+            });
+            
+        } catch (error) {
+            console.error('Falha na inicialização:', error);
+        }
     }
 
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
-    else init();
+    if (document.readyState === 'loading') {
+        Utils.safeAddEventListener(document, 'DOMContentLoaded', init);
+    } else {
+        setTimeout(init, 100);
+    }
 
 })();
