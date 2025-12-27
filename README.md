@@ -2,7 +2,7 @@
 
 > **Otimize, Personalize e Domine sua experiência no YouTube.**
 
-![Version](https://img.shields.io/badge/Version-1.0.4-blue)
+![Version](https://img.shields.io/badge/Version-1.0.0-blue)
 ![Language](https://img.shields.io/badge/Language-JavaScript-F7DF1E?logo=javascript&logoColor=F7DF1E)
 ![Author](https://img.shields.io/badge/Author-John%20Wiliam%20%26%20IA-orange)
 [![Install](https://img.shields.io/badge/Install-Click_Here-green)](https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube%20Enhancer.user.js)
