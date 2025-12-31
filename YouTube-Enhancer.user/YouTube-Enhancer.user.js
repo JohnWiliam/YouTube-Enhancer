@@ -2,7 +2,7 @@
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
 // @version      1.1.2
-// @description  Reduz uso de CPU (Smart Mode corrigido), personaliza layout, remove Shorts e adiciona relógio customizável.
+// @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts e adiciona relógio customizável.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=youtube.com
