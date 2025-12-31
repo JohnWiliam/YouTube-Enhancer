@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      1.1.0
-// @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts e adiciona relógio customizável.
+// @version      1.1.2
+// @description  Reduz uso de CPU (Smart Mode corrigido), personaliza layout, remove Shorts e adiciona relógio customizável.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=youtube.com
@@ -18,7 +18,7 @@
 (function() {
     'use strict';
 
-    const FLAG = "__yt_enhancer_v1_1_0__";
+    const FLAG = "__yt_enhancer_v1_1_2__";
     if (window[FLAG]) return;
     window[FLAG] = true;
 
@@ -125,7 +125,7 @@
             return () => element.removeEventListener(event, safeHandler, options);
         },
 
-        migrateConfig(savedConfig, currentVersion = '1.1.0') {
+        migrateConfig(savedConfig, currentVersion = '1.1.2') {
             if (!savedConfig || typeof savedConfig !== 'object') {
                 return null;
             }
@@ -144,11 +144,11 @@
     // 1. CONFIG MANAGER
     // =======================================================
     const ConfigManager = {
-        CONFIG_VERSION: '1.1.0',
+        CONFIG_VERSION: '1.1.2',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         
         defaults: {
-            version: '1.1.0',
+            version: '1.1.2',
             VIDEOS_PER_ROW: 5,
             FEATURES: {
                 CPU_TAMER: true,
@@ -395,7 +395,6 @@
             this.cleanupFunctions.push(Utils.safeAddEventListener(overlay, 'click', closeModal));
             this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('yt-enhancer-close'), 'click', closeModal));
 
-            // Logic for tabs and inputs remains mostly the same, ensuring UI works
             document.querySelectorAll('.tab-btn').forEach(btn => {
                 this.cleanupFunctions.push(Utils.safeAddEventListener(btn, 'click', () => {
                     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -510,7 +509,7 @@
     };
 
     // =======================================================
-    // 4. SMART CPU TAMER (REDUÇÃO INTELIGENTE DE CPU V2.0)
+    // 4. SMART CPU TAMER CORRIGIDO (COM GRACE PERIOD E SOFT-THROTTLE)
     // =======================================================
     const SmartCpuTamer = {
         initialized: false,
@@ -522,8 +521,10 @@
         state: {
             hidden: false,
             playing: false,
-            throttlingLevel: 0 // 0: None, 1: Lite (Play), 2: Heavy (Idle)
+            throttlingLevel: 0 
         },
+        gracePeriodTimer: null,
+        GRACE_PERIOD_MS: 30000, // 30 segundos antes de ativar otimização pesada
         
         init() {
             if (this.initialized) return;
@@ -535,94 +536,86 @@
             this.bindEvents();
             this.overrideTimers();
             this.initialized = true;
-            log('Smart CPU Tamer v2.0 ativado (Estado + rAF Control)');
+            log('Smart CPU Tamer v2.1 Ativado (Soft Throttle + Grace Period)');
             this.updateState();
         },
 
         cleanup() {
             if (!this.initialized) return;
-            // Restaura funções originais
             targetWindow.setInterval = this.originals.setInterval;
             targetWindow.setTimeout = this.originals.setTimeout;
             targetWindow.requestAnimationFrame = this.originals.requestAnimationFrame;
             
-            // Limpa listeners
             document.removeEventListener('visibilitychange', this.handleVisibility);
+            if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
             this.initialized = false;
         },
 
         bindEvents() {
-            this.handleVisibility = () => this.updateState();
+            this.handleVisibility = () => {
+                if (document.visibilityState === 'hidden') {
+                    // Entrou em background: Inicia contagem de carência
+                    this.state.hidden = true;
+                    if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
+                    this.gracePeriodTimer = setTimeout(() => {
+                        log('Grace Period terminou. Ativando otimização.');
+                        this.updateState(true); // Força update após carência
+                    }, this.GRACE_PERIOD_MS);
+                } else {
+                    // Voltou para a aba: Recuperação IMEDIATA
+                    this.state.hidden = false;
+                    if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
+                    this.updateState();
+                }
+            };
             document.addEventListener('visibilitychange', this.handleVisibility);
 
-            // Detecta Play/Pause globalmente (Capturing phase)
             document.addEventListener('play', () => { this.state.playing = true; this.updateState(); }, true);
             document.addEventListener('pause', () => { this.state.playing = false; this.updateState(); }, true);
             document.addEventListener('ended', () => { this.state.playing = false; this.updateState(); }, true);
         },
 
-        updateState() {
-            this.state.hidden = document.visibilityState === 'hidden';
-            
-            // Lógica da Máquina de Estados
-            if (!this.state.hidden) {
-                this.state.throttlingLevel = 0; // Focado: Performance Máxima
-            } else if (this.state.playing) {
-                this.state.throttlingLevel = 1; // Fundo + Áudio: Redução Segura (Bloqueia visual, mantém áudio)
-            } else {
-                this.state.throttlingLevel = 2; // Fundo + Ocioso: Redução Agressiva (Hibernação)
-            }
+        updateState(forceOptimization = false) {
+            // Se ainda estiver no periodo de carência e oculto, tratamos como nível 0 (Normal)
+            const isGracePeriodActive = this.state.hidden && !forceOptimization && this.gracePeriodTimer;
 
-            // Debug para verificar transição de estado (opcional)
-            // log(`Estado CPU: Nível ${this.state.throttlingLevel} (Hidden: ${this.state.hidden}, Playing: ${this.state.playing})`);
+            if (!this.state.hidden || isGracePeriodActive) {
+                this.state.throttlingLevel = 0; // Performance Máxima
+            } else if (this.state.playing) {
+                this.state.throttlingLevel = 1; // Áudio Background
+            } else {
+                this.state.throttlingLevel = 2; // Hibernação
+            }
         },
 
         overrideTimers() {
             const self = this;
 
-            // 1. Hook setInterval
             targetWindow.setInterval = function(callback, delay, ...args) {
                 let actualDelay = delay;
-                
-                if (self.state.throttlingLevel === 2) {
-                    // Nível 2 (Hibernação): Força mínimo de 10 segundos
-                    actualDelay = Math.max(delay, 10000); 
-                } else if (self.state.throttlingLevel === 1) {
-                    // Nível 1 (Background Play): Força mínimo de 1 segundo (evita micro-updates de UI, mas ok para chunks de rede lentos)
-                    actualDelay = Math.max(delay, 1000); 
-                }
-                
+                if (self.state.throttlingLevel === 2) actualDelay = Math.max(delay, 5000); 
+                else if (self.state.throttlingLevel === 1) actualDelay = Math.max(delay, 1000); 
                 return self.originals.setInterval.call(this, callback, actualDelay, ...args);
             };
 
-            // 2. Hook setTimeout
             targetWindow.setTimeout = function(callback, delay, ...args) {
                 let actualDelay = delay;
-                
-                if (self.state.throttlingLevel === 2) {
-                    actualDelay = Math.max(delay, 10000);
-                } else if (self.state.throttlingLevel === 1) {
-                    // Mais suave no setTimeout para não quebrar carregamento de buffer
-                    actualDelay = Math.max(delay, 250); 
-                }
-
+                if (self.state.throttlingLevel === 2) actualDelay = Math.max(delay, 2000);
+                else if (self.state.throttlingLevel === 1) actualDelay = Math.max(delay, 250); 
                 return self.originals.setTimeout.call(this, callback, actualDelay, ...args);
             };
 
-            // 3. Hook requestAnimationFrame (O Grande Vilão de CPU do YouTube)
+            // CORREÇÃO CRÍTICA AQUI:
             targetWindow.requestAnimationFrame = function(callback) {
-                // Se estiver oculto (Nível 1 ou 2), simplesmente não executa o callback visual.
-                // Isso economiza MUITA GPU e CPU pois o YouTube tenta renderizar a barra de progresso mesmo oculto.
                 if (self.state.throttlingLevel > 0) {
-                    // Retorna um ID falso, mas não agenda a execução.
-                    // Nota: Algumas apps podem depender do callback para lógica.
-                    // Para segurança, executamos em baixa frequência (1fps) em vez de matar totalmente.
+                    // EM VEZ DE IGNORAR, AGENDAMOS PARA EXECUTAR EM 1 SEGUNDO
+                    // Isso garante que o código de carregamento do YouTube eventualmente rode,
+                    // mesmo que a 1 FPS.
                     return self.originals.setTimeout.call(this, () => {
-                        // Opcional: callback(performance.now());
-                        // Mas para economia máxima, dropamos o frame.
+                        // Passamos o timestamp para o callback, como o rAF real faria
+                        callback(performance.now());
                     }, 1000); 
                 }
-
                 return self.originals.requestAnimationFrame.call(this, callback);
             };
         }
@@ -642,19 +635,11 @@
             this.config = config;
             this.playerElement = Utils.DOMCache.get('#movie_player') || 
                                 Utils.DOMCache.get('.html5-video-player');
-            
             this.createClock();
             this.setupObserver();
             EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
-            
-            // Usamos listeners nativos para não depender do loop principal se ele for throttled
             document.addEventListener('fullscreenchange', () => this.handleFullscreen());
-            
-            // Verifica estado periodicamente
-            // Usamos setInterval do window "seguro" (não o throttled) se possível, 
-            // mas como rodamos no sandbox do script, o setInterval aqui é nativo do browser para o script.
             this.interval = setInterval(() => this.handleFullscreen(), 2000);
-            
             log('Clock Manager inicializado');
         },
         
@@ -694,8 +679,7 @@
                 const isFullscreen = document.fullscreenElement != null;
                 const areControlsVisible = !this.playerElement.classList.contains('ytp-autohide');
                 const baseMargin = this.config.CLOCK_STYLE.margin;
-                // Ajusta se os controles estiverem visíveis para não sobrepor
-                const finalBottom = (isFullscreen && areControlsVisible) ? baseMargin + 100 : baseMargin;
+                const finalBottom = (isFullscreen && areControlsVisible) ? baseMargin + 110 : baseMargin;
                 this.clockElement.style.bottom = `${finalBottom}px`;
             } catch (e) { console.error(e); }
         },
@@ -751,32 +735,22 @@
     function init() {
         try {
             const config = ConfigManager.load();
-            
-            // Inicializa módulos baseado na config
-            if (config.FEATURES.CPU_TAMER) {
-                SmartCpuTamer.init();
-            }
+            if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init();
             
             GM_registerMenuCommand('⚙️ Configurações', () => {
-                UIManager.createSettingsModal(config, (newConfig) => {
-                    ConfigManager.save(newConfig);
-                });
+                UIManager.createSettingsModal(config, (newConfig) => ConfigManager.save(newConfig));
             });
             
             StyleManager.init();
             ClockManager.init(config);
             StyleManager.apply(config);
             
-            // Reage a mudanças de configuração em tempo real
             EventBus.on('configChanged', (newConfig) => {
-                if (newConfig.FEATURES.CPU_TAMER && !SmartCpuTamer.initialized) {
-                    SmartCpuTamer.init();
-                } else if (!newConfig.FEATURES.CPU_TAMER && SmartCpuTamer.initialized) {
-                    SmartCpuTamer.cleanup();
-                }
+                if (newConfig.FEATURES.CPU_TAMER && !SmartCpuTamer.initialized) SmartCpuTamer.init();
+                else if (!newConfig.FEATURES.CPU_TAMER && SmartCpuTamer.initialized) SmartCpuTamer.cleanup();
             });
             
-            log(`v${ConfigManager.CONFIG_VERSION} Carregado com Smart CPU Tamer`);
+            log(`v${ConfigManager.CONFIG_VERSION} Carregado com Smart CPU Tamer v2.1`);
             
             Utils.safeAddEventListener(window, 'beforeunload', () => {
                 SmartCpuTamer.cleanup();
