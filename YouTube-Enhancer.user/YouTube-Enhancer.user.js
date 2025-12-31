@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      1.0.3
-// @description  Reduz uso de CPU, personaliza layout, remove Shorts e adiciona relógio customizável com interface refinada.
+// @version      1.1.0
+// @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts e adiciona relógio customizável.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=youtube.com
@@ -18,18 +18,17 @@
 (function() {
     'use strict';
 
-    const FLAG = "__yt_enhancer_v1_0_3__";
+    const FLAG = "__yt_enhancer_v1_1_0__";
     if (window[FLAG]) return;
     window[FLAG] = true;
 
-    // Referência segura para o objeto Window da página (necessário para o CPU Tamer)
-    // Se unsafeWindow não estiver disponível (ex: outros gerenciadores), fallback para window
+    // Referência segura para o objeto Window da página
     const targetWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
     const log = (msg) => console.log(`[YT Enhancer] ${msg}`);
 
     // =======================================================
-    // EVENT BUS SYSTEM - ALTA PRIORIDADE 1
+    // EVENT BUS SYSTEM
     // =======================================================
     const EventBus = {
         events: new Map(),
@@ -66,7 +65,6 @@
     // UTILITÁRIOS
     // =======================================================
     const Utils = {
-        // DEBOUNCE - ALTA PRIORIDADE 2
         debounce(func, wait, immediate = false) {
             let timeout;
             return function(...args) {
@@ -82,7 +80,6 @@
             };
         },
 
-        // CACHE DE DOM - ALTA PRIORIDADE 3
         DOMCache: {
             cache: new Map(),
             observers: new Map(),
@@ -96,39 +93,12 @@
                 return this.cache.get(selector);
             },
             
-            getAll(selector, forceUpdate = false) {
-                if (forceUpdate || !this.cache.has(`all:${selector}`)) {
-                    const elements = document.querySelectorAll(selector);
-                    this.cache.set(`all:${selector}`, elements);
-                    return elements;
-                }
-                return this.cache.get(`all:${selector}`);
-            },
-            
             refresh(selector = null) {
                 if (selector) {
                     this.cache.delete(selector);
-                    this.cache.delete(`all:${selector}`);
                 } else {
                     this.cache.clear();
                 }
-            },
-            
-            observe(selector, callback, options = {}) {
-                const observer = new MutationObserver(
-                    Utils.debounce(callback, 100)
-                );
-                const element = this.get(selector);
-                if (element) {
-                    observer.observe(element, {
-                        childList: true,
-                        subtree: true,
-                        attributes: true,
-                        ...options
-                    });
-                    this.observers.set(selector, observer);
-                }
-                return observer;
             },
             
             disconnect(selector) {
@@ -139,12 +109,8 @@
             }
         },
 
-        // TRATAMENTO SEGURO DE EVENT LISTENERS - CRÍTICO 2
         safeAddEventListener(element, event, handler, options = {}) {
-            if (!element) {
-                // log(`Element not found for event: ${event}`); // Silenciado para reduzir spam no log
-                return () => {};
-            }
+            if (!element) return () => {};
             
             const safeHandler = (e) => {
                 try {
@@ -156,44 +122,33 @@
             };
             
             element.addEventListener(event, safeHandler, options);
-            
-            // Retorna função de cleanup
             return () => element.removeEventListener(event, safeHandler, options);
         },
 
-        // MIGRAÇÃO DE CONFIGURAÇÕES - CRÍTICO 3
-        migrateConfig(savedConfig, currentVersion = '1.0.3') {
+        migrateConfig(savedConfig, currentVersion = '1.1.0') {
             if (!savedConfig || typeof savedConfig !== 'object') {
                 return null;
             }
-
-            // Se não tem versão, é da versão inicial
             if (!savedConfig.version) {
                 savedConfig.version = '1.0.0';
                 if (!savedConfig.CLOCK_STYLE?.borderRadius) {
-                    savedConfig.CLOCK_STYLE = {
-                        ...savedConfig.CLOCK_STYLE,
-                        borderRadius: 12
-                    };
+                    savedConfig.CLOCK_STYLE = { ...savedConfig.CLOCK_STYLE, borderRadius: 12 };
                 }
             }
-
-            // Atualizar versão no objeto final
             savedConfig.version = currentVersion;
-
             return savedConfig;
         }
     };
 
     // =======================================================
-    // 1. CONFIG MANAGER (COM MIGRAÇÃO)
+    // 1. CONFIG MANAGER
     // =======================================================
     const ConfigManager = {
-        CONFIG_VERSION: '1.0.3',
+        CONFIG_VERSION: '1.1.0',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         
         defaults: {
-            version: '1.0.3',
+            version: '1.1.0',
             VIDEOS_PER_ROW: 5,
             FEATURES: {
                 CPU_TAMER: true,
@@ -215,21 +170,15 @@
         load: function() {
             try {
                 const saved = GM_getValue(this.STORAGE_KEY);
-                
                 const migratedConfig = Utils.migrateConfig(saved, this.CONFIG_VERSION);
                 
                 if (!migratedConfig) {
-                    log('Usando configurações padrão');
                     return { ...this.defaults };
                 }
                 
                 const config = { ...this.defaults, ...migratedConfig };
                 config.FEATURES = { ...this.defaults.FEATURES, ...(migratedConfig.FEATURES || {}) };
-                config.CLOCK_STYLE = { 
-                    ...this.defaults.CLOCK_STYLE, 
-                    ...(migratedConfig.CLOCK_STYLE || {}) 
-                };
-                
+                config.CLOCK_STYLE = { ...this.defaults.CLOCK_STYLE, ...(migratedConfig.CLOCK_STYLE || {}) };
                 config.VIDEOS_PER_ROW = Math.max(3, Math.min(8, config.VIDEOS_PER_ROW));
                 
                 return config;
@@ -253,7 +202,7 @@
     };
 
     // =======================================================
-    // 2. UI MANAGER (COM EVENT BUS)
+    // 2. UI MANAGER
     // =======================================================
     const UIManager = {
         cleanupFunctions: [],
@@ -287,13 +236,12 @@
                     </div>
 
                     <div class="modal-content">
-                        
                         <div id="tab-features" class="tab-pane active">
                             <div class="options-list">
                                 <label class="feature-toggle">
                                     <div class="toggle-text">
-                                        <strong>Redução de CPU (V1.0)</strong>
-                                        <span>Limita scripts em segundo plano</span>
+                                        <strong>Redução Inteligente de CPU</strong>
+                                        <span>Otimiza quando oculto (economiza bateria)</span>
                                     </div>
                                     <div class="toggle-switch">
                                         <input type="checkbox" id="cfg-cpu-tamer" ${currentConfig.FEATURES.CPU_TAMER ? 'checked' : ''}>
@@ -343,7 +291,6 @@
 
                         <div id="tab-appearance" class="tab-pane">
                             <div class="appearance-grid">
-                                
                                 <div class="control-group">
                                     <label>Cor do Texto</label>
                                     <div class="color-input-wrapper">
@@ -351,7 +298,6 @@
                                         <span class="color-value">${currentConfig.CLOCK_STYLE.color}</span>
                                     </div>
                                 </div>
-
                                 <div class="control-group">
                                     <label>Cor do Fundo</label>
                                     <div class="color-input-wrapper">
@@ -359,22 +305,18 @@
                                         <span class="color-value">${currentConfig.CLOCK_STYLE.bgColor}</span>
                                     </div>
                                 </div>
-
                                 <div class="control-group">
                                     <label>Opacidade Fundo</label>
                                     <input type="number" id="style-bg-opacity" min="0" max="1" step="0.1" value="${currentConfig.CLOCK_STYLE.bgOpacity}" class="styled-input">
                                 </div>
-
                                 <div class="control-group">
                                     <label>Tamanho Fonte (px)</label>
                                     <input type="number" id="style-font-size" min="12" max="100" value="${currentConfig.CLOCK_STYLE.fontSize}" class="styled-input">
                                 </div>
-                                
                                 <div class="control-group">
                                     <label>Margem (px)</label>
                                     <input type="number" id="style-margin" min="0" max="200" value="${currentConfig.CLOCK_STYLE.margin}" class="styled-input">
                                 </div>
-
                                 <div class="control-group">
                                     <label>Arredondamento (px)</label>
                                     <input type="number" id="style-border-radius" min="0" max="50" value="${currentConfig.CLOCK_STYLE.borderRadius || 12}" class="styled-input">
@@ -397,102 +339,44 @@
                         border: 1px solid #333; border-radius: 12px;
                         box-shadow: 0 12px 24px rgba(0,0,0,0.5);
                         font-family: 'Roboto', Arial, sans-serif; font-size: 14px;
-                        display: flex; flex-direction: column;
-                        z-index: 10000;
+                        display: flex; flex-direction: column; z-index: 10000;
                     }
-                    input::-webkit-outer-spin-button,
-                    input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+                    input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
                     input[type=number] { -moz-appearance: textfield; }
-
-                    .modal-header {
-                        position: relative; height: 50px; border-bottom: 1px solid #333;
-                        display: flex; align-items: center; justify-content: flex-end; padding: 0 15px;
-                    }
-                    .modal-title {
-                        position: absolute; left: 50%; transform: translateX(-50%);
-                        margin: 0; font-size: 16px; font-weight: 500; color: #fff;
-                        white-space: nowrap; pointer-events: none;
-                    }
-                    .close-btn {
-                        background: none; border: none; color: #aaa; font-size: 24px;
-                        cursor: pointer; padding: 0 5px; line-height: 1; transition: color 0.2s;
-                    }
+                    .modal-header { height: 50px; border-bottom: 1px solid #333; display: flex; align-items: center; justify-content: flex-end; padding: 0 15px; position: relative; }
+                    .modal-title { position: absolute; left: 50%; transform: translateX(-50%); margin: 0; font-size: 16px; font-weight: 500; color: #fff; }
+                    .close-btn { background: none; border: none; color: #aaa; font-size: 24px; cursor: pointer; padding: 0 5px; }
                     .close-btn:hover { color: #fff; }
-
                     .tabs-nav { display: flex; background: #1a1a1a; border-bottom: 1px solid #333; }
-                    .tab-btn {
-                        flex: 1; padding: 12px; background: transparent; border: none;
-                        color: #888; cursor: pointer; font-weight: 500; border-bottom: 2px solid transparent;
-                        transition: all 0.2s;
-                    }
+                    .tab-btn { flex: 1; padding: 12px; background: transparent; border: none; color: #888; cursor: pointer; font-weight: 500; border-bottom: 2px solid transparent; }
                     .tab-btn:hover { color: #ccc; background: #222; }
                     .tab-btn.active { color: #3ea6ff; border-bottom-color: #3ea6ff; background: #1a1a1a; }
-
                     .modal-content { padding: 20px; overflow-y: auto; flex: 1; }
                     .tab-pane { display: none; }
                     .tab-pane.active { display: block; animation: fadeEffect 0.2s; }
                     @keyframes fadeEffect { from {opacity: 0;} to {opacity: 1;} }
-
                     .options-list { display: flex; flex-direction: column; gap: 15px; }
-                    .feature-toggle {
-                        display: flex; justify-content: space-between; align-items: center;
-                        padding: 10px; background: #1e1e1e; border-radius: 8px; cursor: pointer;
-                        border: 1px solid transparent; transition: background 0.2s;
-                    }
+                    .feature-toggle { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #1e1e1e; border-radius: 8px; cursor: pointer; }
                     .feature-toggle:hover { background: #252525; }
                     .toggle-text strong { display: block; font-size: 14px; margin-bottom: 2px; }
                     .toggle-text span { font-size: 12px; color: #aaa; }
-                    
                     .toggle-switch { position: relative; width: 40px; height: 22px; }
                     .toggle-switch input { opacity: 0; width: 0; height: 0; }
-                    .slider {
-                        position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-                        background-color: #555; border-radius: 22px; transition: .3s;
-                    }
-                    .slider:before {
-                        position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px;
-                        background-color: white; border-radius: 50%; transition: .3s;
-                    }
+                    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 22px; transition: .3s; }
+                    .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; }
                     input:checked + .slider { background-color: #3ea6ff; }
                     input:checked + .slider:before { transform: translateX(18px); }
-
-                    .sub-option {
-                        margin: -5px 0 10px 10px; padding: 10px; border-left: 2px solid #333;
-                        display: flex; align-items: center; gap: 10px; color: #ccc;
-                    }
-
+                    .sub-option { margin: -5px 0 10px 10px; padding: 10px; border-left: 2px solid #333; display: flex; align-items: center; gap: 10px; color: #ccc; }
                     .appearance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
                     .control-group { display: flex; flex-direction: column; gap: 8px; }
-                    .control-group label { font-size: 12px; color: #aaa; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
-
-                    .styled-input, .styled-select {
-                        background: #1a1a1a; border: 1px solid #333; color: white;
-                        padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box;
-                        font-family: inherit; font-size: 14px;
-                    }
+                    .styled-input, .styled-select { background: #1a1a1a; border: 1px solid #333; color: white; padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box; }
                     .styled-input-small { width: 60px; padding: 5px; background: #222; border: 1px solid #444; color: white; border-radius: 4px; text-align: center; }
-                    
-                    .color-input-wrapper {
-                        display: flex; align-items: center; gap: 10px;
-                        background: #1a1a1a; padding: 5px; border: 1px solid #333; border-radius: 6px;
-                    }
-                    input[type="color"] {
-                        border: none; width: 30px; height: 30px; padding: 0; background: none; cursor: pointer;
-                    }
-                    .color-value { font-size: 12px; font-family: monospace; color: #888; }
-
-                    .modal-footer {
-                        padding: 15px 20px; border-top: 1px solid #333;
-                        display: flex; justify-content: flex-end; gap: 10px;
-                    }
-                    .btn {
-                        padding: 8px 20px; border: none; border-radius: 18px;
-                        cursor: pointer; font-weight: 500; transition: opacity 0.2s;
-                    }
+                    .color-input-wrapper { display: flex; align-items: center; gap: 10px; background: #1a1a1a; padding: 5px; border: 1px solid #333; border-radius: 6px; }
+                    input[type="color"] { border: none; width: 30px; height: 30px; padding: 0; background: none; cursor: pointer; }
+                    .modal-footer { padding: 15px 20px; border-top: 1px solid #333; display: flex; justify-content: flex-end; gap: 10px; }
+                    .btn { padding: 8px 20px; border: none; border-radius: 18px; cursor: pointer; font-weight: 500; }
                     .btn-primary { background: #3ea6ff; color: #000; }
                     .btn-primary:hover { opacity: 0.9; }
-
-                    input:focus, select:focus { outline: none; border-color: #3ea6ff; }
                 </style>
             `;
 
@@ -511,33 +395,25 @@
             this.cleanupFunctions.push(Utils.safeAddEventListener(overlay, 'click', closeModal));
             this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('yt-enhancer-close'), 'click', closeModal));
 
-            // Tabs Logic
+            // Logic for tabs and inputs remains mostly the same, ensuring UI works
             document.querySelectorAll('.tab-btn').forEach(btn => {
-                this.cleanupFunctions.push(
-                    Utils.safeAddEventListener(btn, 'click', () => {
-                        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-                        btn.classList.add('active');
-                        document.getElementById(btn.dataset.target).classList.add('active');
-                    })
-                );
+                this.cleanupFunctions.push(Utils.safeAddEventListener(btn, 'click', () => {
+                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+                    btn.classList.add('active');
+                    document.getElementById(btn.dataset.target).classList.add('active');
+                }));
             });
 
-            // Layout Toggle
             const layoutToggle = document.getElementById('cfg-layout');
-            this.cleanupFunctions.push(
-                Utils.safeAddEventListener(layoutToggle, 'change', (e) => {
-                    document.getElementById('layout-settings').style.display = e.target.checked ? 'flex' : 'none';
-                })
-            );
+            this.cleanupFunctions.push(Utils.safeAddEventListener(layoutToggle, 'change', (e) => {
+                document.getElementById('layout-settings').style.display = e.target.checked ? 'flex' : 'none';
+            }));
 
-            // Color Inputs
             ['style-color', 'style-bg-color'].forEach(id => {
-                this.cleanupFunctions.push(
-                    Utils.safeAddEventListener(document.getElementById(id), 'input', (e) => {
-                        e.target.nextElementSibling.textContent = e.target.value;
-                    })
-                );
+                this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById(id), 'input', (e) => {
+                    e.target.nextElementSibling.textContent = e.target.value;
+                }));
             });
 
             const getNewConfig = () => {
@@ -561,49 +437,41 @@
                 };
             };
 
-            const initialCpuTamerState = currentConfig.FEATURES.CPU_TAMER;
-            const cpuToggle = document.getElementById('cfg-cpu-tamer');
             const btnApply = document.getElementById('yt-enhancer-apply');
             const btnReload = document.getElementById('yt-enhancer-reload');
+            const cpuToggle = document.getElementById('cfg-cpu-tamer');
+            const initialCpuState = currentConfig.FEATURES.CPU_TAMER;
 
-            const updateButtonState = () => {
-                const isCpuChanged = cpuToggle.checked !== initialCpuTamerState;
-                btnApply.style.display = isCpuChanged ? 'none' : 'block';
-                btnReload.style.display = isCpuChanged ? 'block' : 'none';
-            };
+            this.cleanupFunctions.push(Utils.safeAddEventListener(cpuToggle, 'change', () => {
+                const changed = cpuToggle.checked !== initialCpuState;
+                btnApply.style.display = changed ? 'none' : 'block';
+                btnReload.style.display = changed ? 'block' : 'none';
+            }));
 
-            this.cleanupFunctions.push(Utils.safeAddEventListener(cpuToggle, 'change', updateButtonState));
+            this.cleanupFunctions.push(Utils.safeAddEventListener(btnApply, 'click', () => {
+                onSave(getNewConfig());
+                closeModal();
+            }));
 
-            this.cleanupFunctions.push(
-                Utils.safeAddEventListener(btnApply, 'click', () => {
-                    onSave(getNewConfig());
-                    closeModal();
-                })
-            );
-
-            this.cleanupFunctions.push(
-                Utils.safeAddEventListener(btnReload, 'click', () => {
-                    onSave(getNewConfig());
-                    closeModal();
-                    setTimeout(() => window.location.reload(), 100);
-                })
-            );
+            this.cleanupFunctions.push(Utils.safeAddEventListener(btnReload, 'click', () => {
+                onSave(getNewConfig());
+                closeModal();
+                setTimeout(() => window.location.reload(), 100);
+            }));
         }
     };
 
     // =======================================================
-    // 3. STYLE MANAGER (COM EVENT BUS)
+    // 3. STYLE MANAGER
     // =======================================================
     const StyleManager = {
         styleId: 'yt-enhancer-styles',
-        currentConfig: null,
         
         init() {
             EventBus.on('configChanged', (config) => this.apply(config));
         },
         
         apply: function(config) {
-            this.currentConfig = config;
             const old = document.getElementById(this.styleId);
             if (old) old.remove();
 
@@ -642,76 +510,126 @@
     };
 
     // =======================================================
-    // 4. CPU TAMER SEGURO - (CORRIGIDO PARA UNSAFEWINDOW)
+    // 4. SMART CPU TAMER (REDUÇÃO INTELIGENTE DE CPU V2.0)
     // =======================================================
-    const CpuTamer = {
-        originalTimers: {
+    const SmartCpuTamer = {
+        initialized: false,
+        originals: {
             setInterval: null,
-            setTimeout: null
+            setTimeout: null,
+            requestAnimationFrame: null
         },
-        
-        isInitialized: false,
-        criticalTimers: new Set(),
+        state: {
+            hidden: false,
+            playing: false,
+            throttlingLevel: 0 // 0: None, 1: Lite (Play), 2: Heavy (Idle)
+        },
         
         init() {
-            if (this.isInitialized) return;
+            if (this.initialized) return;
             
-            // ATENÇÃO: Usando targetWindow (unsafeWindow) para afetar a página real
-            this.originalTimers.setInterval = targetWindow.setInterval;
-            this.originalTimers.setTimeout = targetWindow.setTimeout;
-            
-            // Wrapper seguro para setInterval na PÁGINA
-            // Usamos exportFunction implícito do Violentmonkey ao atribuir a função
-            targetWindow.setInterval = (callback, delay, ...args) => {
-                const isCritical = this.criticalTimers.has(callback);
-                let actualDelay = delay;
-                
-                // Se a aba estiver oculta e não for crítico, força delay alto
-                if (!isCritical && document.visibilityState === 'hidden') {
-                    actualDelay = Math.max(delay, 2000); // Mínimo 2s em background
-                }
-                
-                return this.originalTimers.setInterval.call(targetWindow, callback, actualDelay, ...args);
-            };
-            
-            targetWindow.setTimeout = (callback, delay, ...args) => {
-                const isCritical = this.criticalTimers.has(callback);
-                let actualDelay = delay;
-                
-                if (!isCritical && document.visibilityState === 'hidden') {
-                    actualDelay = Math.max(delay, 1000);
-                }
-                
-                return this.originalTimers.setTimeout.call(targetWindow, callback, actualDelay, ...args);
-            };
-            
-            this.isInitialized = true;
-            log('CPU Tamer inicializado (Modo unsafeWindow)');
+            this.originals.setInterval = targetWindow.setInterval;
+            this.originals.setTimeout = targetWindow.setTimeout;
+            this.originals.requestAnimationFrame = targetWindow.requestAnimationFrame;
+
+            this.bindEvents();
+            this.overrideTimers();
+            this.initialized = true;
+            log('Smart CPU Tamer v2.0 ativado (Estado + rAF Control)');
+            this.updateState();
         },
-        
-        markCritical(callback) {
-            if (typeof callback === 'function') {
-                this.criticalTimers.add(callback);
-            }
-        },
-        
-        unmarkCritical(callback) {
-            this.criticalTimers.delete(callback);
-        },
-        
+
         cleanup() {
-            if (this.isInitialized) {
-                // Restaura os timers originais no objeto window da página
-                targetWindow.setInterval = this.originalTimers.setInterval;
-                targetWindow.setTimeout = this.originalTimers.setTimeout;
-                this.isInitialized = false;
-                this.criticalTimers.clear();
+            if (!this.initialized) return;
+            // Restaura funções originais
+            targetWindow.setInterval = this.originals.setInterval;
+            targetWindow.setTimeout = this.originals.setTimeout;
+            targetWindow.requestAnimationFrame = this.originals.requestAnimationFrame;
+            
+            // Limpa listeners
+            document.removeEventListener('visibilitychange', this.handleVisibility);
+            this.initialized = false;
+        },
+
+        bindEvents() {
+            this.handleVisibility = () => this.updateState();
+            document.addEventListener('visibilitychange', this.handleVisibility);
+
+            // Detecta Play/Pause globalmente (Capturing phase)
+            document.addEventListener('play', () => { this.state.playing = true; this.updateState(); }, true);
+            document.addEventListener('pause', () => { this.state.playing = false; this.updateState(); }, true);
+            document.addEventListener('ended', () => { this.state.playing = false; this.updateState(); }, true);
+        },
+
+        updateState() {
+            this.state.hidden = document.visibilityState === 'hidden';
+            
+            // Lógica da Máquina de Estados
+            if (!this.state.hidden) {
+                this.state.throttlingLevel = 0; // Focado: Performance Máxima
+            } else if (this.state.playing) {
+                this.state.throttlingLevel = 1; // Fundo + Áudio: Redução Segura (Bloqueia visual, mantém áudio)
+            } else {
+                this.state.throttlingLevel = 2; // Fundo + Ocioso: Redução Agressiva (Hibernação)
             }
+
+            // Debug para verificar transição de estado (opcional)
+            // log(`Estado CPU: Nível ${this.state.throttlingLevel} (Hidden: ${this.state.hidden}, Playing: ${this.state.playing})`);
+        },
+
+        overrideTimers() {
+            const self = this;
+
+            // 1. Hook setInterval
+            targetWindow.setInterval = function(callback, delay, ...args) {
+                let actualDelay = delay;
+                
+                if (self.state.throttlingLevel === 2) {
+                    // Nível 2 (Hibernação): Força mínimo de 10 segundos
+                    actualDelay = Math.max(delay, 10000); 
+                } else if (self.state.throttlingLevel === 1) {
+                    // Nível 1 (Background Play): Força mínimo de 1 segundo (evita micro-updates de UI, mas ok para chunks de rede lentos)
+                    actualDelay = Math.max(delay, 1000); 
+                }
+                
+                return self.originals.setInterval.call(this, callback, actualDelay, ...args);
+            };
+
+            // 2. Hook setTimeout
+            targetWindow.setTimeout = function(callback, delay, ...args) {
+                let actualDelay = delay;
+                
+                if (self.state.throttlingLevel === 2) {
+                    actualDelay = Math.max(delay, 10000);
+                } else if (self.state.throttlingLevel === 1) {
+                    // Mais suave no setTimeout para não quebrar carregamento de buffer
+                    actualDelay = Math.max(delay, 250); 
+                }
+
+                return self.originals.setTimeout.call(this, callback, actualDelay, ...args);
+            };
+
+            // 3. Hook requestAnimationFrame (O Grande Vilão de CPU do YouTube)
+            targetWindow.requestAnimationFrame = function(callback) {
+                // Se estiver oculto (Nível 1 ou 2), simplesmente não executa o callback visual.
+                // Isso economiza MUITA GPU e CPU pois o YouTube tenta renderizar a barra de progresso mesmo oculto.
+                if (self.state.throttlingLevel > 0) {
+                    // Retorna um ID falso, mas não agenda a execução.
+                    // Nota: Algumas apps podem depender do callback para lógica.
+                    // Para segurança, executamos em baixa frequência (1fps) em vez de matar totalmente.
+                    return self.originals.setTimeout.call(this, () => {
+                        // Opcional: callback(performance.now());
+                        // Mas para economia máxima, dropamos o frame.
+                    }, 1000); 
+                }
+
+                return self.originals.requestAnimationFrame.call(this, callback);
+            };
         }
     };
 
     // =======================================================
-    // 5. CLOCK MANAGER (COM DEBOUNCE E CACHE)
+    // 5. CLOCK MANAGER
     // =======================================================
     const ClockManager = {
         clockElement: null,
@@ -719,31 +637,23 @@
         config: null,
         observer: null,
         playerElement: null,
-        cleanupFunctions: [],
         
         init(config) {
             this.config = config;
-            // Expondo para debug se necessário, mas seguro
-            window.ClockManager = this;
-            
             this.playerElement = Utils.DOMCache.get('#movie_player') || 
                                 Utils.DOMCache.get('.html5-video-player');
             
             this.createClock();
             this.setupObserver();
-            
             EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
             
-            this.cleanupFunctions.push(
-                Utils.safeAddEventListener(
-                    document,
-                    'fullscreenchange',
-                    Utils.debounce(() => this.handleFullscreen(), 100)
-                )
-            );
+            // Usamos listeners nativos para não depender do loop principal se ele for throttled
+            document.addEventListener('fullscreenchange', () => this.handleFullscreen());
             
-            // Intervalo interno do script (não afetado pelo CPU Tamer da página, pois roda no sandbox)
-            this.interval = window.setInterval(() => this.handleFullscreen(), 2000);
+            // Verifica estado periodicamente
+            // Usamos setInterval do window "seguro" (não o throttled) se possível, 
+            // mas como rodamos no sandbox do script, o setInterval aqui é nativo do browser para o script.
+            this.interval = setInterval(() => this.handleFullscreen(), 2000);
             
             log('Clock Manager inicializado');
         },
@@ -756,15 +666,13 @@
         
         createClock() {
             if (document.getElementById('yt-enhancer-clock')) return;
-            
             const clock = document.createElement('div');
             clock.id = 'yt-enhancer-clock';
             clock.style.cssText = `
                 position: fixed; pointer-events: none; z-index: 2147483647;
-                font-family: "Roboto", sans-serif; font-weight: 400;
-                padding: 6px 14px;
-                text-shadow: 0 1px 3px rgba(0,0,0,0.8);
-                display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+                font-family: "Roboto", sans-serif; font-weight: 400; padding: 6px 14px;
+                text-shadow: 0 1px 3px rgba(0,0,0,0.8); display: none; 
+                box-shadow: 0 2px 10px rgba(0,0,0,0.3);
                 transition: bottom 0.3s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s;
             `;
             document.body.appendChild(clock);
@@ -774,73 +682,43 @@
         
         setupObserver() {
             if (!this.playerElement) return;
-
             this.observer = new MutationObserver(
-                Utils.debounce(() => {
-                    this.adjustPosition();
-                }, 150)
+                Utils.debounce(() => this.adjustPosition(), 150)
             );
-
-            this.observer.observe(this.playerElement, {
-                attributes: true,
-                attributeFilter: ['class'],
-                childList: false,
-                subtree: false
-            });
+            this.observer.observe(this.playerElement, { attributes: true, attributeFilter: ['class'] });
         },
         
         adjustPosition() {
             if (!this.clockElement || !this.playerElement) return;
-
             try {
                 const isFullscreen = document.fullscreenElement != null;
                 const areControlsVisible = !this.playerElement.classList.contains('ytp-autohide');
                 const baseMargin = this.config.CLOCK_STYLE.margin;
-                let finalBottom = baseMargin;
-
-                if (isFullscreen && areControlsVisible) {
-                    finalBottom = baseMargin + 110;
-                }
-
+                // Ajusta se os controles estiverem visíveis para não sobrepor
+                const finalBottom = (isFullscreen && areControlsVisible) ? baseMargin + 110 : baseMargin;
                 this.clockElement.style.bottom = `${finalBottom}px`;
-            } catch (error) {
-                console.error('Adjust position error:', error);
-            }
+            } catch (e) { console.error(e); }
         },
         
         updateStyle() {
             if (!this.clockElement) return;
-            
-            try {
-                const s = this.config.CLOCK_STYLE;
-                const el = this.clockElement;
-                
-                const hexToRgb = (hex) => {
-                    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-                    return result ? 
-                        `${parseInt(result[1],16)},${parseInt(result[2],16)},${parseInt(result[3],16)}` : 
-                        '0,0,0';
-                };
-
-                el.style.backgroundColor = `rgba(${hexToRgb(s.bgColor)}, ${s.bgOpacity})`;
-                el.style.color = s.color;
-                el.style.fontSize = `${s.fontSize}px`;
-                el.style.right = `${s.margin}px`;
-                el.style.borderRadius = `${s.borderRadius}px`;
-                
-                this.adjustPosition();
-            } catch (error) {
-                console.error('Update style error:', error);
-            }
+            const s = this.config.CLOCK_STYLE;
+            const hexToRgb = (hex) => {
+                const res = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+                return res ? `${parseInt(res[1],16)},${parseInt(res[2],16)},${parseInt(res[3],16)}` : '0,0,0';
+            };
+            this.clockElement.style.backgroundColor = `rgba(${hexToRgb(s.bgColor)}, ${s.bgOpacity})`;
+            this.clockElement.style.color = s.color;
+            this.clockElement.style.fontSize = `${s.fontSize}px`;
+            this.clockElement.style.right = `${s.margin}px`;
+            this.clockElement.style.borderRadius = `${s.borderRadius}px`;
+            this.adjustPosition();
         },
         
         updateTime() {
             if (!this.clockElement) return;
             const now = new Date();
-            this.clockElement.textContent = now.toLocaleTimeString([], { 
-                hour: '2-digit', 
-                minute: '2-digit' 
-            });
+            this.clockElement.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         },
         
         handleFullscreen() {
@@ -848,25 +726,15 @@
                 if (this.clockElement) this.clockElement.style.display = 'none';
                 return;
             }
-
-            const isFullscreen = document.fullscreenElement != null;
-            
-            if (isFullscreen) {
+            if (document.fullscreenElement) {
                 if (!this.clockElement) this.createClock();
                 this.clockElement.style.display = 'block';
                 this.updateTime();
                 this.adjustPosition();
-                
-                // Usar window.setInterval do script (não do YouTube) para atualizar o relógio
-                if (!this.timeInterval) {
-                    this.timeInterval = window.setInterval(() => this.updateTime(), 1000);
-                }
+                if (!this.timeInterval) this.timeInterval = setInterval(() => this.updateTime(), 1000);
             } else {
                 if (this.clockElement) this.clockElement.style.display = 'none';
-                if (this.timeInterval) {
-                    clearInterval(this.timeInterval);
-                    this.timeInterval = null;
-                }
+                if (this.timeInterval) { clearInterval(this.timeInterval); this.timeInterval = null; }
             }
         },
         
@@ -874,20 +742,19 @@
             if (this.observer) this.observer.disconnect();
             if (this.interval) clearInterval(this.interval);
             if (this.timeInterval) clearInterval(this.timeInterval);
-            this.cleanupFunctions.forEach(fn => fn());
-            this.cleanupFunctions = [];
         }
     };
 
     // =======================================================
-    // MAIN (COM EVENT BUS)
+    // MAIN
     // =======================================================
     function init() {
         try {
             const config = ConfigManager.load();
             
+            // Inicializa módulos baseado na config
             if (config.FEATURES.CPU_TAMER) {
-                CpuTamer.init();
+                SmartCpuTamer.init();
             }
             
             GM_registerMenuCommand('⚙️ Configurações', () => {
@@ -900,22 +767,19 @@
             ClockManager.init(config);
             StyleManager.apply(config);
             
+            // Reage a mudanças de configuração em tempo real
             EventBus.on('configChanged', (newConfig) => {
-                try {
-                    if (newConfig.FEATURES.CPU_TAMER && !CpuTamer.isInitialized) {
-                        CpuTamer.init();
-                    } else if (!newConfig.FEATURES.CPU_TAMER && CpuTamer.isInitialized) {
-                        CpuTamer.cleanup();
-                    }
-                } catch (error) {
-                    console.error('Config change error:', error);
+                if (newConfig.FEATURES.CPU_TAMER && !SmartCpuTamer.initialized) {
+                    SmartCpuTamer.init();
+                } else if (!newConfig.FEATURES.CPU_TAMER && SmartCpuTamer.initialized) {
+                    SmartCpuTamer.cleanup();
                 }
             });
             
-            log(`v${ConfigManager.CONFIG_VERSION} Inicializado`);
+            log(`v${ConfigManager.CONFIG_VERSION} Carregado com Smart CPU Tamer`);
             
             Utils.safeAddEventListener(window, 'beforeunload', () => {
-                CpuTamer.cleanup();
+                SmartCpuTamer.cleanup();
                 ClockManager.cleanup();
                 Utils.DOMCache.refresh();
             });
