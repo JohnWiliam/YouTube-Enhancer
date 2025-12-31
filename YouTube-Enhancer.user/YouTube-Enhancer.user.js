@@ -695,7 +695,7 @@
                 const areControlsVisible = !this.playerElement.classList.contains('ytp-autohide');
                 const baseMargin = this.config.CLOCK_STYLE.margin;
                 // Ajusta se os controles estiverem visíveis para não sobrepor
-                const finalBottom = (isFullscreen && areControlsVisible) ? baseMargin + 110 : baseMargin;
+                const finalBottom = (isFullscreen && areControlsVisible) ? baseMargin + 100 : baseMargin;
                 this.clockElement.style.bottom = `${finalBottom}px`;
             } catch (e) { console.error(e); }
         },
