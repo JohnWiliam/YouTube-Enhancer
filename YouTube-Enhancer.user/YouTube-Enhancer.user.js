@@ -694,7 +694,7 @@
             this.clockElement.style.backgroundColor = `rgba(${hexToRgb(s.bgColor)}, ${s.bgOpacity})`;
             this.clockElement.style.color = s.color;
             this.clockElement.style.fontSize = `${s.fontSize}px`;
-            this.clockElement.style.right = `10px`;
+            this.clockElement.style.right = `20px`;
             this.clockElement.style.borderRadius = `${s.borderRadius}px`;
             this.adjustPosition();
         },
