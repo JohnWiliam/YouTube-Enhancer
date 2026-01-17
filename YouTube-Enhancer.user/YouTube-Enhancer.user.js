@@ -159,7 +159,7 @@
             CLOCK_STYLE: {
                 color: '#ffffff',
                 bgColor: '#191919',
-                bgOpacity: 0.3,
+                bgOpacity: 0.2,
                 fontSize: 22,
                 margin: 30,
                 borderRadius: 25,
