@@ -679,7 +679,7 @@
                 const isFullscreen = document.fullscreenElement != null;
                 const areControlsVisible = !this.playerElement.classList.contains('ytp-autohide');
                 const baseMargin = this.config.CLOCK_STYLE.margin;
-                const finalBottom = (isFullscreen && areControlsVisible) ? baseMargin + 105 : baseMargin;
+                const finalBottom = (isFullscreen && areControlsVisible) ? baseMargin + 110 : baseMargin;
                 this.clockElement.style.bottom = `${finalBottom}px`;
             } catch (e) { console.error(e); }
         },
@@ -694,7 +694,7 @@
             this.clockElement.style.backgroundColor = `rgba(${hexToRgb(s.bgColor)}, ${s.bgOpacity})`;
             this.clockElement.style.color = s.color;
             this.clockElement.style.fontSize = `${s.fontSize}px`;
-            this.clockElement.style.right = `35px`;
+            this.clockElement.style.right = `45px`;
             this.clockElement.style.borderRadius = `${s.borderRadius}px`;
             this.adjustPosition();
         },
