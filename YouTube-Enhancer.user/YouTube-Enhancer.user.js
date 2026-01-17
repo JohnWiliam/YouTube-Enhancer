@@ -159,7 +159,7 @@
             CLOCK_STYLE: {
                 color: '#ffffff',
                 bgColor: '#000000',
-                bgOpacity: 0.4,
+                bgOpacity: 0.3,
                 fontSize: 22,
                 margin: 30,
                 borderRadius: 25,
@@ -694,7 +694,7 @@
             this.clockElement.style.backgroundColor = `rgba(${hexToRgb(s.bgColor)}, ${s.bgOpacity})`;
             this.clockElement.style.color = s.color;
             this.clockElement.style.fontSize = `${s.fontSize}px`;
-            this.clockElement.style.right = `30px`;
+            this.clockElement.style.right = `35px`;
             this.clockElement.style.borderRadius = `${s.borderRadius}px`;
             this.adjustPosition();
         },
