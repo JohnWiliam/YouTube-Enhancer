@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      1.1.6
-// @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts e adiciona relógio customizável.
+// @version      1.1.7
+// @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts, elimina blur/translucidez e adiciona relógio customizável.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=youtube.com
@@ -18,7 +18,7 @@
 (function() {
     'use strict';
 
-    const FLAG = "__yt_enhancer_v1_1_6__";
+    const FLAG = "__yt_enhancer_v1_1_7__";
     if (window[FLAG]) return;
     window[FLAG] = true;
 
@@ -145,11 +145,11 @@
     // 1. CONFIG MANAGER
     // =======================================================
     const ConfigManager = {
-        CONFIG_VERSION: '1.1.6',
+        CONFIG_VERSION: '1.1.7',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         
         defaults: {
-            version: '1.1.6',
+            version: '1.1.7',
             VIDEOS_PER_ROW: 5,
             FEATURES: {
                 CPU_TAMER: true,
@@ -221,7 +221,7 @@
             overlay.id = 'yt-enhancer-overlay';
             overlay.style.cssText = `
                 position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                background: rgba(0,0,0,0.6); z-index: 9998; backdrop-filter: blur(4px);
+                background: transparent; z-index: 9998; backdrop-filter: none;
             `;
 
             const modalHTML = `
@@ -475,9 +475,29 @@
             const old = document.getElementById(this.styleId);
             if (old) old.remove();
 
-            if (!config.FEATURES.LAYOUT_ENHANCEMENT && !config.FEATURES.SHORTS_REMOVAL) return;
+            let css = `
+                /* Remove blur/translucidez do YouTube para favorecer pipeline RTX HDR/VSR */
+                html *, html *::before, html *::after {
+                    backdrop-filter: none !important;
+                    -webkit-backdrop-filter: none !important;
+                }
 
-            let css = '';
+                ytd-app,
+                ytd-masthead,
+                ytd-mini-guide-renderer,
+                ytd-guide-renderer,
+                ytd-popup-container tp-yt-paper-dialog,
+                tp-yt-paper-dialog,
+                tp-yt-app-drawer,
+                yt-notification-action-renderer,
+                ytd-multi-page-menu-renderer,
+                ytd-searchbox,
+                #frosted-glass,
+                #background {
+                    background: transparent !important;
+                    background-color: transparent !important;
+                }
+            `;
             if (config.FEATURES.LAYOUT_ENHANCEMENT) {
                 css += `
                     ytd-rich-grid-renderer { 
