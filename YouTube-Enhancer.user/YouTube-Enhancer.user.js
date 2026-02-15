@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      1.1.5
+// @version      1.1.6
 // @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts e adiciona relógio customizável.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
@@ -18,7 +18,7 @@
 (function() {
     'use strict';
 
-    const FLAG = "__yt_enhancer_v1_1_5__";
+    const FLAG = "__yt_enhancer_v1_1_6__";
     if (window[FLAG]) return;
     window[FLAG] = true;
 
@@ -145,11 +145,11 @@
     // 1. CONFIG MANAGER
     // =======================================================
     const ConfigManager = {
-        CONFIG_VERSION: '1.1.5',
+        CONFIG_VERSION: '1.1.6',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         
         defaults: {
-            version: '1.1.5',
+            version: '1.1.6',
             VIDEOS_PER_ROW: 5,
             FEATURES: {
                 CPU_TAMER: true,
