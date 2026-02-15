@@ -687,7 +687,7 @@
 
             this.handlers.play = () => { this.state.playing = true; this.updateState(); };
             this.handlers.pause = () => { this.state.playing = false; this.updateState(); };
-            this.handlers.ended = () => { this.state.playing = false; this.updateState(); };
+            this.handlers.ended = this.handlers.pause;
             document.addEventListener('play', this.handlers.play, true);
             document.addEventListener('pause', this.handlers.pause, true);
             document.addEventListener('ended', this.handlers.ended, true);
