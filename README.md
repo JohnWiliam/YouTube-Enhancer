@@ -2,7 +2,7 @@
 
 > **Otimize, Personalize e Domine sua experiência no YouTube.**
 
-![Version](https://img.shields.io/badge/Version-1.1.2-blue)
+![Version](https://img.shields.io/badge/Version-1.1.7-blue)
 ![Language](https://img.shields.io/badge/Language-JavaScript-F7DF1E?logo=javascript&logoColor=F7DF1E)
 ![Author](https://img.shields.io/badge/Author-John%20Wiliam%20%26%20IA-orange)
 [![Install](https://img.shields.io/badge/Install-Click_Here-green)](https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js)
@@ -35,6 +35,13 @@ Um relógio elegante sobreposto ao vídeo em **Tela Cheia**, para que você não
 * **Modo Forçado:** Pode ser configurado para ficar "Sempre Ligado" ou "Sempre Desligado".
 * **Totalmente Estilizável:** Mude cores, opacidade, tamanho da fonte, margem e até o arredondamento das bordas.
 
+
+### 🧼 5. Modo RTX (Sem Blur/Translucidez)
+Para máxima compatibilidade visual e foco em desempenho de vídeo:
+* Remove efeitos de **blur/backdrop-filter** da UI do YouTube.
+* Substitui superfícies translúcidas por **transparência**.
+* Ajuda cenários de processamento de vídeo (ex.: **RTX HDR / RTX VSR**) em que o blur da interface pode atrapalhar a cadeia de captura/renderização.
+
 ---
 
 ## ⚙️ Painel de Configurações
@@ -52,6 +59,7 @@ Não é preciso editar código! O script possui uma interface gráfica nativa e 
 | **Layout Grid** | Ativa o redimensionamento do grid. Inclui seletor numérico (3-8). |
 | **Remover Shorts** | Limpa toda a interface de conteúdos do tipo "Shorts". |
 | **Relógio Flutuante** | Habilita o relógio sobreposto no player de vídeo. |
+| **Modo RTX (sem blur)** | Remove blur/translucidez da interface e força transparência. |
 
 ### 🎨 Aba Aparência (Relógio)
 Personalize o relógio visualmente em tempo real:

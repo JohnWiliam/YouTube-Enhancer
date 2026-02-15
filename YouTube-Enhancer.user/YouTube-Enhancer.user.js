@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      1.1.6
-// @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts e adiciona relógio customizável.
+// @version      1.1.7
+// @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts, elimina blur/translucidez e adiciona relógio customizável.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=youtube.com
@@ -18,7 +18,7 @@
 (function() {
     'use strict';
 
-    const FLAG = "__yt_enhancer_v1_1_6__";
+    const FLAG = "__yt_enhancer_v1_1_7__";
     if (window[FLAG]) return;
     window[FLAG] = true;
 
@@ -126,7 +126,7 @@
             return () => element.removeEventListener(event, safeHandler, options);
         },
 
-        migrateConfig(savedConfig, currentVersion = '1.1.5') {
+        migrateConfig(savedConfig, currentVersion = '1.1.7') {
             if (!savedConfig || typeof savedConfig !== 'object') {
                 return null;
             }
@@ -145,17 +145,18 @@
     // 1. CONFIG MANAGER
     // =======================================================
     const ConfigManager = {
-        CONFIG_VERSION: '1.1.6',
+        CONFIG_VERSION: '1.1.7',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         
         defaults: {
-            version: '1.1.6',
+            version: '1.1.7',
             VIDEOS_PER_ROW: 5,
             FEATURES: {
                 CPU_TAMER: true,
                 LAYOUT_ENHANCEMENT: true,
                 SHORTS_REMOVAL: true,
-                FULLSCREEN_CLOCK: true
+                FULLSCREEN_CLOCK: true,
+                RTX_VISUAL_MODE: true
             },
             CLOCK_STYLE: {
                 color: '#ffffff',
@@ -221,7 +222,7 @@
             overlay.id = 'yt-enhancer-overlay';
             overlay.style.cssText = `
                 position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                background: rgba(0,0,0,0.6); z-index: 9998; backdrop-filter: blur(4px);
+                background: rgba(0,0,0,0.6); z-index: 9998;
             `;
 
             const modalHTML = `
@@ -284,6 +285,17 @@
                                     </div>
                                     <div class="toggle-switch">
                                         <input type="checkbox" id="cfg-clock-enable" ${currentConfig.FEATURES.FULLSCREEN_CLOCK ? 'checked' : ''}>
+                                        <span class="slider"></span>
+                                    </div>
+                                </label>
+
+                                <label class="feature-toggle">
+                                    <div class="toggle-text">
+                                        <strong>Modo RTX (sem blur/translucidez)</strong>
+                                        <span>Remove blur e transforma fundos translúcidos em transparentes</span>
+                                    </div>
+                                    <div class="toggle-switch">
+                                        <input type="checkbox" id="cfg-rtx-visual" ${currentConfig.FEATURES.RTX_VISUAL_MODE ? 'checked' : ''}>
                                         <span class="slider"></span>
                                     </div>
                                 </label>
@@ -423,7 +435,8 @@
                         CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
                         LAYOUT_ENHANCEMENT: document.getElementById('cfg-layout').checked,
                         SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked,
-                        FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked
+                        FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked,
+                        RTX_VISUAL_MODE: document.getElementById('cfg-rtx-visual').checked
                     },
                     CLOCK_STYLE: {
                         color: document.getElementById('style-color').value,
@@ -475,7 +488,7 @@
             const old = document.getElementById(this.styleId);
             if (old) old.remove();
 
-            if (!config.FEATURES.LAYOUT_ENHANCEMENT && !config.FEATURES.SHORTS_REMOVAL) return;
+            if (!config.FEATURES.LAYOUT_ENHANCEMENT && !config.FEATURES.SHORTS_REMOVAL && !config.FEATURES.RTX_VISUAL_MODE) return;
 
             let css = '';
             if (config.FEATURES.LAYOUT_ENHANCEMENT) {
@@ -498,6 +511,59 @@
                     ytd-guide-entry-renderer:has(a[title="Shorts"]),
                     ytd-mini-guide-entry-renderer[aria-label="Shorts"] { 
                         display: none !important; 
+                    }
+                `;
+            }
+            if (config.FEATURES.RTX_VISUAL_MODE) {
+                css += `
+                    :root {
+                        --yt-spec-general-background-a: transparent !important;
+                        --yt-spec-general-background-b: transparent !important;
+                        --yt-spec-raised-background: transparent !important;
+                        --yt-spec-10-percent-layer: transparent !important;
+                        --yt-spec-badge-chip-background: transparent !important;
+                    }
+                    ytd-app *,
+                    tp-yt-iron-dropdown,
+                    tp-yt-paper-dialog,
+                    yt-confirm-dialog-renderer,
+                    ytd-popup-container,
+                    ytd-multi-page-menu-renderer,
+                    ytd-mini-guide-renderer,
+                    ytd-guide-renderer,
+                    ytd-searchbox,
+                    ytd-watch-flexy,
+                    ytd-live-chat-frame,
+                    .ytp-popup,
+                    .ytp-panel,
+                    .ytp-tooltip,
+                    .ytp-settings-menu,
+                    .ytp-menuitem,
+                    .iv-drawer,
+                    .sbdd_a,
+                    [style*="backdrop-filter"],
+                    [style*="-webkit-backdrop-filter"] {
+                        backdrop-filter: none !important;
+                        -webkit-backdrop-filter: none !important;
+                    }
+                    ytd-app [style*="rgba("],
+                    ytd-app [style*="rgb("],
+                    ytd-app [style*="background:"],
+                    ytd-app [style*="background-color:"] {
+                        background-image: none !important;
+                        box-shadow: none !important;
+                    }
+                    ytd-masthead,
+                    #guide,
+                    ytd-mini-guide-renderer,
+                    ytd-popup-container tp-yt-paper-dialog,
+                    ytd-multi-page-menu-renderer,
+                    tp-yt-iron-dropdown,
+                    .ytp-popup,
+                    .ytp-settings-menu,
+                    .ytp-panel {
+                        background: transparent !important;
+                        background-color: transparent !important;
                     }
                 `;
             }
