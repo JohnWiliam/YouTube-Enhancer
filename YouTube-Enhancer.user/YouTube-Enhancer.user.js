@@ -584,11 +584,15 @@
                     ytd-popup-container tp-yt-paper-dialog,
                     ytd-multi-page-menu-renderer,
                     tp-yt-iron-dropdown,
-                    .ytp-popup,
-                    .ytp-settings-menu,
-                    .ytp-panel {
+                    .ytp-popup {
                         background: transparent !important;
                         background-color: transparent !important;
+                    }
+                    .ytp-settings-menu,
+                    .ytp-panel,
+                    .ytp-popup.ytp-contextmenu {
+                        background: #0f0f0f !important;
+                        opacity: 0.96 !important;
                     }
                 `;
             }
