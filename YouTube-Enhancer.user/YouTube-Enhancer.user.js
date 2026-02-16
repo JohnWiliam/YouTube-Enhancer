@@ -66,6 +66,35 @@
     // UTILITÁRIOS
     // =======================================================
     const Utils = {
+        clamp(value, min, max, fallback = min) {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric)) return fallback;
+            return Math.min(max, Math.max(min, numeric));
+        },
+
+        isHexColor(value) {
+            return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+        },
+
+        sanitizeConfig(config, defaults) {
+            const safeConfig = {
+                ...defaults,
+                ...(config || {}),
+                FEATURES: { ...defaults.FEATURES, ...(config?.FEATURES || {}) },
+                CLOCK_STYLE: { ...defaults.CLOCK_STYLE, ...(config?.CLOCK_STYLE || {}) }
+            };
+
+            safeConfig.VIDEOS_PER_ROW = this.clamp(safeConfig.VIDEOS_PER_ROW, 3, 8, defaults.VIDEOS_PER_ROW);
+            safeConfig.CLOCK_STYLE.bgOpacity = this.clamp(safeConfig.CLOCK_STYLE.bgOpacity, 0, 1, defaults.CLOCK_STYLE.bgOpacity);
+            safeConfig.CLOCK_STYLE.fontSize = this.clamp(safeConfig.CLOCK_STYLE.fontSize, 12, 48, defaults.CLOCK_STYLE.fontSize);
+            safeConfig.CLOCK_STYLE.margin = this.clamp(safeConfig.CLOCK_STYLE.margin, 0, 120, defaults.CLOCK_STYLE.margin);
+            safeConfig.CLOCK_STYLE.borderRadius = this.clamp(safeConfig.CLOCK_STYLE.borderRadius, 0, 50, defaults.CLOCK_STYLE.borderRadius);
+            safeConfig.CLOCK_STYLE.color = this.isHexColor(safeConfig.CLOCK_STYLE.color) ? safeConfig.CLOCK_STYLE.color : defaults.CLOCK_STYLE.color;
+            safeConfig.CLOCK_STYLE.bgColor = this.isHexColor(safeConfig.CLOCK_STYLE.bgColor) ? safeConfig.CLOCK_STYLE.bgColor : defaults.CLOCK_STYLE.bgColor;
+
+            return safeConfig;
+        },
+
         debounce(func, wait, immediate = false) {
             let timeout;
             return function(...args) {
@@ -175,26 +204,22 @@
                 const migratedConfig = Utils.migrateConfig(saved, this.CONFIG_VERSION);
                 
                 if (!migratedConfig) {
-                    return { ...this.defaults };
+                    return Utils.sanitizeConfig({}, this.defaults);
                 }
-                
-                const config = { ...this.defaults, ...migratedConfig };
-                config.FEATURES = { ...this.defaults.FEATURES, ...(migratedConfig.FEATURES || {}) };
-                config.CLOCK_STYLE = { ...this.defaults.CLOCK_STYLE, ...(migratedConfig.CLOCK_STYLE || {}) };
-                config.VIDEOS_PER_ROW = Math.max(3, Math.min(8, config.VIDEOS_PER_ROW));
-                
-                return config;
+
+                return Utils.sanitizeConfig(migratedConfig, this.defaults);
             } catch (error) {
                 log('Erro ao carregar configuração: ' + error);
-                return { ...this.defaults };
+                return Utils.sanitizeConfig({}, this.defaults);
             }
         },
 
         save: function(config) {
             try {
-                config.version = this.CONFIG_VERSION;
-                GM_setValue(this.STORAGE_KEY, config);
-                EventBus.emit('configChanged', config);
+                const sanitizedConfig = Utils.sanitizeConfig(config, this.defaults);
+                sanitizedConfig.version = this.CONFIG_VERSION;
+                GM_setValue(this.STORAGE_KEY, sanitizedConfig);
+                EventBus.emit('configChanged', sanitizedConfig);
                 return true;
             } catch (error) {
                 log('Erro ao salvar configuração: ' + error);
@@ -429,7 +454,7 @@
             });
 
             const getNewConfig = () => {
-                return {
+                return Utils.sanitizeConfig({
                     VIDEOS_PER_ROW: parseInt(document.getElementById('cfg-videos-row').value) || 5,
                     FEATURES: {
                         CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
@@ -447,7 +472,7 @@
                         borderRadius: parseInt(document.getElementById('style-border-radius').value),
                         position: 'bottom-right'
                     }
-                };
+                }, ConfigManager.defaults);
             };
 
             const btnApply = document.getElementById('yt-enhancer-apply');
@@ -583,13 +608,22 @@
         originals: {
             setInterval: null,
             setTimeout: null,
-            requestAnimationFrame: null
+            requestAnimationFrame: null,
+            cancelAnimationFrame: null
         },
         state: {
             hidden: false,
             playing: false,
             throttlingLevel: 0 
         },
+        handlers: {
+            visibility: null,
+            play: null,
+            pause: null,
+            ended: null
+        },
+        rafFallbackTimers: new Map(),
+        rafFallbackId: 0,
         gracePeriodTimer: null,
         GRACE_PERIOD_MS: 30000, // 30 segundos antes de ativar otimização pesada
         
@@ -599,6 +633,7 @@
             this.originals.setInterval = targetWindow.setInterval;
             this.originals.setTimeout = targetWindow.setTimeout;
             this.originals.requestAnimationFrame = targetWindow.requestAnimationFrame;
+            this.originals.cancelAnimationFrame = targetWindow.cancelAnimationFrame;
 
             this.bindEvents();
             this.overrideTimers();
@@ -612,19 +647,31 @@
             targetWindow.setInterval = this.originals.setInterval;
             targetWindow.setTimeout = this.originals.setTimeout;
             targetWindow.requestAnimationFrame = this.originals.requestAnimationFrame;
+            targetWindow.cancelAnimationFrame = this.originals.cancelAnimationFrame;
             
-            document.removeEventListener('visibilitychange', this.handleVisibility);
+            if (this.handlers.visibility) document.removeEventListener('visibilitychange', this.handlers.visibility);
+            if (this.handlers.play) document.removeEventListener('play', this.handlers.play, true);
+            if (this.handlers.pause) document.removeEventListener('pause', this.handlers.pause, true);
+            if (this.handlers.ended) document.removeEventListener('ended', this.handlers.ended, true);
+            this.handlers = { visibility: null, play: null, pause: null, ended: null };
+
             if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
+            this.gracePeriodTimer = null;
+
+            this.rafFallbackTimers.forEach((timeoutId) => clearTimeout(timeoutId));
+            this.rafFallbackTimers.clear();
+
             this.initialized = false;
         },
 
         bindEvents() {
-            this.handleVisibility = () => {
+            this.handlers.visibility = () => {
                 if (document.visibilityState === 'hidden') {
                     // Entrou em background: Inicia contagem de carência
                     this.state.hidden = true;
                     if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
                     this.gracePeriodTimer = setTimeout(() => {
+                        this.gracePeriodTimer = null;
                         log('Grace Period terminou. Ativando otimização.');
                         this.updateState(true); // Força update após carência
                     }, this.GRACE_PERIOD_MS);
@@ -632,14 +679,20 @@
                     // Voltou para a aba: Recuperação IMEDIATA
                     this.state.hidden = false;
                     if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
+                    this.gracePeriodTimer = null;
                     this.updateState();
                 }
             };
-            document.addEventListener('visibilitychange', this.handleVisibility);
+            document.addEventListener('visibilitychange', this.handlers.visibility);
 
-            document.addEventListener('play', () => { this.state.playing = true; this.updateState(); }, true);
-            document.addEventListener('pause', () => { this.state.playing = false; this.updateState(); }, true);
-            document.addEventListener('ended', () => { this.state.playing = false; this.updateState(); }, true);
+            this.handlers.play = () => { this.state.playing = true; this.updateState(); };
+            this.handlers.pause = () => { this.state.playing = false; this.updateState(); };
+            this.handlers.ended = this.handlers.pause;
+            document.addEventListener('play', this.handlers.play, true);
+            document.addEventListener('pause', this.handlers.pause, true);
+            document.addEventListener('ended', this.handlers.ended, true);
+
+            this.state.hidden = document.visibilityState === 'hidden';
         },
 
         updateState(forceOptimization = false) {
@@ -657,33 +710,52 @@
 
         overrideTimers() {
             const self = this;
+            const normalizeDelay = (delay) => {
+                const parsedDelay = Number(delay);
+                return Number.isFinite(parsedDelay) ? parsedDelay : 0;
+            };
 
             targetWindow.setInterval = function(callback, delay, ...args) {
-                let actualDelay = delay;
-                if (self.state.throttlingLevel === 2) actualDelay = Math.max(delay, 5000); 
-                else if (self.state.throttlingLevel === 1) actualDelay = Math.max(delay, 1000); 
+                const parsedDelay = normalizeDelay(delay);
+                let actualDelay = parsedDelay;
+                if (self.state.throttlingLevel === 2) actualDelay = Math.max(parsedDelay, 5000); 
+                else if (self.state.throttlingLevel === 1) actualDelay = Math.max(parsedDelay, 1000); 
                 return self.originals.setInterval.call(this, callback, actualDelay, ...args);
             };
 
             targetWindow.setTimeout = function(callback, delay, ...args) {
-                let actualDelay = delay;
-                if (self.state.throttlingLevel === 2) actualDelay = Math.max(delay, 2000);
-                else if (self.state.throttlingLevel === 1) actualDelay = Math.max(delay, 250); 
+                const parsedDelay = normalizeDelay(delay);
+                let actualDelay = parsedDelay;
+                if (self.state.throttlingLevel === 2) actualDelay = Math.max(parsedDelay, 2000);
+                else if (self.state.throttlingLevel === 1) actualDelay = Math.max(parsedDelay, 250); 
                 return self.originals.setTimeout.call(this, callback, actualDelay, ...args);
             };
 
             // CORREÇÃO CRÍTICA AQUI:
             targetWindow.requestAnimationFrame = function(callback) {
                 if (self.state.throttlingLevel > 0) {
-                    // EM VEZ DE IGNORAR, AGENDAMOS PARA EXECUTAR EM 1 SEGUNDO
-                    // Isso garante que o código de carregamento do YouTube eventualmente rode,
-                    // mesmo que a 1 FPS.
-                    return self.originals.setTimeout.call(this, () => {
+                    const fallbackId = ++self.rafFallbackId;
+                    const timeoutId = self.originals.setTimeout.call(this, () => {
+                        self.rafFallbackTimers.delete(fallbackId);
                         // Passamos o timestamp para o callback, como o rAF real faria
                         callback(performance.now());
                     }, 1000); 
+                    self.rafFallbackTimers.set(fallbackId, timeoutId);
+                    return fallbackId;
                 }
                 return self.originals.requestAnimationFrame.call(this, callback);
+            };
+
+            targetWindow.cancelAnimationFrame = function(id) {
+                if (self.rafFallbackTimers.has(id)) {
+                    const timeoutId = self.rafFallbackTimers.get(id);
+                    self.rafFallbackTimers.delete(id);
+                    return clearTimeout(timeoutId);
+                }
+                if (typeof self.originals.cancelAnimationFrame === 'function') {
+                    return self.originals.cancelAnimationFrame.call(this, id);
+                }
+                return clearTimeout(id);
             };
         }
     };
