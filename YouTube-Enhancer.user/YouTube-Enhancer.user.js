@@ -209,7 +209,7 @@
                         description: 'Ajusta vídeos por linha'
                     },
                     videosPerRow: 'Vídeos por linha',
-                    videosPerRowHint: 'Define quantos vídeos aparecem em cada linha (3 a 8)',
+                    videosPerRowHint: 'Define quantos vídeos aparecem em cada linha',
                     shorts: {
                         title: 'Remover Shorts',
                         description: 'Limpa Shorts da interface'
@@ -263,7 +263,7 @@
                         description: 'Adjusts videos per row'
                     },
                     videosPerRow: 'Videos per row',
-                    videosPerRowHint: 'Defines how many videos appear in each row (3 to 8)',
+                    videosPerRowHint: 'Defines how many videos appear in each row',
                     shorts: {
                         title: 'Remove Shorts',
                         description: 'Cleans Shorts from the interface'
