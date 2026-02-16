@@ -610,7 +610,7 @@
         hiddenElements: new Set(),
         enabled: false,
 
-        debouncedPrune: Utils.debounce(() => {
+        debouncedPrune: Utils.debounce(function() {
             if (this.enabled) this.prune();
         }, 150),
 
