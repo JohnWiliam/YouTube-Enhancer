@@ -2,7 +2,7 @@
 
 > **Otimize, Personalize e Domine sua experiência no YouTube.**
 
-![Version](https://img.shields.io/badge/Version-1.1.7-blue)
+![Version](https://img.shields.io/badge/Version-2.0.0-blue)
 ![Language](https://img.shields.io/badge/Language-JavaScript-F7DF1E?logo=javascript&logoColor=F7DF1E)
 ![Author](https://img.shields.io/badge/Author-John%20Wiliam%20%26%20IA-orange)
 [![Install](https://img.shields.io/badge/Install-Click_Here-green)](https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js)
@@ -67,7 +67,7 @@ Personalize o relógio visualmente em tempo real:
 * 📏 **Dimensões:** Ajuste Tamanho da Fonte, Margem e Arredondamento (Border Radius).
 * 🔄 **Modo de Ativação:** Automático, Sempre Ligado ou Sempre Desligado.
 
-> **Nota:** As configurações possuem botões para **"Aplicar"** (teste imediato) e **"Salvar e Recarregar"** (para fixar as mudanças).
+> **Nota:** As configurações possuem botões para **"Aplicar"** (teste imediato) e **"Aplicar e Recarregar"** (para fixar as mudanças).
 
 ---
 
