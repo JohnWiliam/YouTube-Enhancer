@@ -516,10 +516,8 @@
 
                     <div class="modal-footer">
                         <p id="yt-enhancer-reload-note" class="reload-note" style="display: none;">${t('modal.reloadNotice', currentConfig.LANGUAGE)}</p>
-                        <div class="modal-actions">
-                            <button id="yt-enhancer-apply" class="btn btn-primary">${t('modal.buttons.apply', currentConfig.LANGUAGE)}</button>
-                            <button id="yt-enhancer-reload" class="btn btn-primary" style="display: none;">${t('modal.buttons.applyAndReload', currentConfig.LANGUAGE)}</button>
-                        </div>
+                        <button id="yt-enhancer-apply" class="btn btn-primary">${t('modal.buttons.apply', currentConfig.LANGUAGE)}</button>
+                        <button id="yt-enhancer-reload" class="btn btn-primary" style="display: none;">${t('modal.buttons.applyAndReload', currentConfig.LANGUAGE)}</button>
                     </div>
                 </div>
 
@@ -552,7 +550,6 @@
                     .feature-toggle:hover { background: #252525; }
                     .feature-card-select { gap: 16px; }
                     .feature-card-select .styled-select { max-width: 140px; }
-                    .feature-card-input { gap: 16px; }
                     .toggle-text strong { display: block; font-size: 14px; margin-bottom: 2px; }
                     .toggle-text span { font-size: 12px; color: #aaa; }
                     .toggle-switch { position: relative; width: 40px; height: 22px; }
@@ -567,10 +564,9 @@
                     .styled-input-small { width: 60px; padding: 5px; background: #222; border: 1px solid #444; color: white; border-radius: 4px; text-align: center; }
                     .color-input-wrapper { display: flex; align-items: center; gap: 10px; background: #1a1a1a; padding: 5px; border: 1px solid #333; border-radius: 6px; }
                     input[type="color"] { border: none; width: 30px; height: 30px; padding: 0; background: none; cursor: pointer; }
-                    .modal-footer { padding: 15px 20px; border-top: 1px solid #333; display: flex; align-items: center; gap: 12px; }
-                    .reload-note { margin: 0; color: #f6cf6a; font-size: 12px; flex: 1; min-width: 0; }
-                    .modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-left: auto; }
-                    .btn { min-width: 156px; padding: 8px 20px; border: none; border-radius: 18px; cursor: pointer; font-weight: 500; display: inline-flex; justify-content: center; }
+                    .modal-footer { padding: 15px 20px; border-top: 1px solid #333; display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 10px; }
+                    .reload-note { margin: 0; color: #f6cf6a; font-size: 12px; flex: 1 1 100%; }
+                    .btn { padding: 8px 20px; border: none; border-radius: 18px; cursor: pointer; font-weight: 500; }
                     .btn-primary { background: #3ea6ff; color: #000; }
                     .btn-primary:hover { opacity: 0.9; }
                 </style>
