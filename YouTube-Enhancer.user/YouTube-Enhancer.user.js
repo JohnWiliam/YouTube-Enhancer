@@ -547,6 +547,7 @@
                         --yt-spec-raised-background: transparent !important;
                         --yt-spec-10-percent-layer: transparent !important;
                         --yt-spec-badge-chip-background: transparent !important;
+                        --rtx-player-menu-background: rgba(15, 15, 15, 0.96) !important;
                     }
                     ytd-app *,
                     tp-yt-iron-dropdown,
@@ -590,9 +591,10 @@
                     }
                     .ytp-settings-menu,
                     .ytp-panel,
+                    .ytp-panel-menu,
                     .ytp-popup.ytp-contextmenu {
-                        background: #0f0f0f !important;
-                        opacity: 0.96 !important;
+                        background: var(--rtx-player-menu-background) !important;
+                        background-color: var(--rtx-player-menu-background) !important;
                     }
                 `;
             }
