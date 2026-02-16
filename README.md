@@ -1,92 +1,117 @@
 # 🚀 YouTube Enhancer
 
-> **Otimize, Personalize e Domine sua experiência no YouTube.**
+> **Optimize, Customize, and Take control of your YouTube experience.**  
+> **Otimize, personalize e domine sua experiência no YouTube.**
 
-![Version](https://img.shields.io/badge/Version-1.1.7-blue)
+![Version](https://img.shields.io/badge/Version-2.0.0-blue)
 ![Language](https://img.shields.io/badge/Language-JavaScript-F7DF1E?logo=javascript&logoColor=F7DF1E)
 ![Author](https://img.shields.io/badge/Author-John%20Wiliam%20%26%20IA-orange)
 [![Install](https://img.shields.io/badge/Install-Click_Here-green)](https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js)
 
-O **YouTube Enhancer** é um Userscript poderoso projetado para o ambiente **Violentmonkey**. Ele transforma a navegação no YouTube, focando em performance (redução de CPU), limpeza visual (remoção de Shorts) e utilitários inteligentes (relógio em tela cheia), tudo controlado por um painel de configurações moderno e fácil de usar.
+* **Idioma/Language**
+
+[🇧🇷 Português](#-português) | [🇺🇸 English](#-english)
 
 ---
 
-## ✨ Funcionalidades Principais
+## 🇺🇸 English
 
-### ⚡ 1. Otimização de Performance (Smart CPU Tamer)
-O YouTube é conhecido por consumir muitos recursos. Este script implementa um **limitador inteligente**:
-* **Background Throttling:** Quando a aba do YouTube não está visível, o script reduz drasticamente a taxa de atualização de scripts em segundo plano.
-* **Resultado:** Menos uso de processador, menos aquecimento e maior duração de bateria em laptops.
+YouTube Enhancer is a powerful userscript for **Violentmonkey** that improves YouTube performance, visual clarity, and usability through a modern settings panel.
 
-### 🎨 2. Controle Total do Layout
-Diga adeus ao layout padrão confuso.
-* **Grid Personalizável:** Defina exatamente quantos vídeos você quer ver por linha na página inicial (de **3 a 8** vídeos).
-* **Adaptação Responsiva:** O script ajusta automaticamente o grid para telas menores, garantindo que o visual nunca quebre.
+### ✨ Main Features
 
-### 🚫 3. Bloqueador de Shorts
-Foque no conteúdo que importa. O script remove cirurgicamente todo o "ruído" dos Shorts:
-* Remove carrosséis de Shorts ("Reel Shelfs").
-* Remove abas e botões de Shorts no menu lateral.
-* Esconde vídeos marcados como Shorts nas listagens de busca.
+1. **⚡ Smart CPU Tamer**
+   - Reduces script activity when the tab is hidden.
+   - Helps lower CPU usage, heat, and battery drain.
 
-### ⏰ 4. Relógio Flutuante Inteligente (Smart Clock)
-Um relógio elegante sobreposto ao vídeo em **Tela Cheia**, para que você não perca a hora durante maratonas.
-* **Ligado/Desligado:** com switch para habilitar ou desabilitar.
-* **Totalmente Estilizável:** Mude cores, opacidade, tamanho da fonte, margem e até o arredondamento das bordas.
+2. **🎨 Grid Layout Control**
+   - Choose how many videos appear per row (**3 to 8**).
+   - Responsive behavior for smaller screens.
 
+3. **🚫 Shorts Removal**
+   - Removes Shorts shelves, menu entries, and Shorts-style listings.
 
-### 🧼 5. Modo RTX (Sem Blur/Translucidez)
-Para máxima compatibilidade visual e foco em desempenho de vídeo:
-* Remove efeitos de **blur/backdrop-filter** da UI do YouTube.
-* Substitui superfícies translúcidas por **transparência**.
-* Ajuda cenários de processamento de vídeo (ex.: **RTX HDR / RTX VSR**) em que o blur da interface pode atrapalhar a cadeia de captura/renderização.
+4. **⏰ Floating Clock (Fullscreen)**
+   - Displays time overlay during fullscreen playback.
+   - Fully customizable: colors, opacity, size, margin, border radius.
+
+5. **🧼 RTX Visual Mode (No Blur/Translucency)**
+   - Removes blur/backdrop-filter effects from YouTube UI.
+   - Replaces translucent backgrounds with transparency.
+
+### ⚙️ Settings Panel
+
+No code editing required:
+1. Open the Violentmonkey script menu.
+2. Click **"⚙️ Settings"**.
+3. Configure features and clock appearance.
+
+> **Note:** some changes (like CPU mode and language) require **Apply and Reload**.
+
+### 📥 Installation
+
+1. Install **Violentmonkey** in your browser.
+2. Install the script via direct link (badge above) or paste the source manually.
+3. Open `www.youtube.com`.
+
+### 🛠️ Technologies
+
+- JavaScript (ES6+)
+- GM API (`GM_getValue`, `GM_setValue`, `GM_registerMenuCommand`)
+- Dynamic CSS injection
+
+### 📝 Credits
+
+Developed by **John Wiliam** with **AI assistance**.
 
 ---
 
-## ⚙️ Painel de Configurações
+## 🇧🇷 Português
 
-Não é preciso editar código! O script possui uma interface gráfica nativa e moderna.
+O YouTube Enhancer é um userscript poderoso para **Violentmonkey** que melhora desempenho, limpeza visual e usabilidade do YouTube por meio de um painel moderno de configurações.
 
-1. Abra o menu do seu gerenciador de scripts (Violentmonkey).
+### ✨ Funcionalidades Principais
+
+1. **⚡ Smart CPU Tamer**
+   - Reduz a atividade de scripts quando a aba está oculta.
+   - Ajuda a diminuir uso de CPU, aquecimento e consumo de bateria.
+
+2. **🎨 Controle de Layout Grid**
+   - Permite escolher quantos vídeos aparecem por linha (**3 a 8**).
+   - Comportamento responsivo em telas menores.
+
+3. **🚫 Remoção de Shorts**
+   - Remove prateleiras, entradas de menu e listagens do tipo Shorts.
+
+4. **⏰ Relógio Flutuante (Tela Cheia)**
+   - Exibe hora sobre o vídeo em tela cheia.
+   - Totalmente personalizável: cores, opacidade, tamanho, margem e borda.
+
+5. **🧼 Modo RTX (Sem Blur/Translucidez)**
+   - Remove efeitos de blur/backdrop-filter da interface do YouTube.
+   - Substitui fundos translúcidos por transparência.
+
+### ⚙️ Painel de Configurações
+
+Sem editar código:
+1. Abra o menu do Violentmonkey.
 2. Clique em **"⚙️ Configurações"**.
-3. Um modal exclusivo abrirá com duas abas:
+3. Ajuste funcionalidades e aparência do relógio.
 
-### 🔧 Aba Funcionalidades
-| Opção | Descrição |
-| :--- | :--- |
-| **Redução de CPU** | Ativa/Desativa o limitador de scripts em segundo plano. |
-| **Layout Grid** | Ativa o redimensionamento do grid. Inclui seletor numérico (3-8). |
-| **Remover Shorts** | Limpa toda a interface de conteúdos do tipo "Shorts". |
-| **Relógio Flutuante** | Habilita o relógio sobreposto no player de vídeo. |
-| **Modo RTX (sem blur)** | Remove blur/translucidez da interface e força transparência. |
+> **Nota:** algumas alterações (como CPU e idioma) exigem **Aplicar e Recarregar**.
 
-### 🎨 Aba Aparência (Relógio)
-Personalize o relógio visualmente em tempo real:
-* 🎨 **Cores:** Seletor de cor para Texto e Fundo.
-* 👁️ **Opacidade:** Controle a transparência do fundo.
-* 📏 **Dimensões:** Ajuste Tamanho da Fonte, Margem e Arredondamento (Border Radius).
-* 🔄 **Modo de Ativação:** Automático, Sempre Ligado ou Sempre Desligado.
+### 📥 Instalação
 
-> **Nota:** As configurações possuem botões para **"Aplicar"** (teste imediato) e **"Salvar e Recarregar"** (para fixar as mudanças).
+1. Instale a extensão **Violentmonkey** no navegador.
+2. Instale o script pelo link direto (badge acima) ou cole o código-fonte manualmente.
+3. Acesse `www.youtube.com`.
 
----
+### 🛠️ Tecnologias
 
-## 📥 Instalação
+- JavaScript (ES6+)
+- GM API (`GM_getValue`, `GM_setValue`, `GM_registerMenuCommand`)
+- Injeção dinâmica de CSS
 
-1. Certifique-se de ter a extensão **Violentmonkey** instalada no seu Firefox.
-2. Instale o script através do link direto ou criando um novo script e colando o código fonte.
-3. Acesse `www.youtube.com` e aproveite!
-
----
-
-## 🛠️ Tecnologias
-* **JavaScript (ES6+)**
-* **GM API** (`GM_getValue`, `GM_setValue`, `GM_registerMenuCommand`)
-* **CSS3 Dinâmico** (Injeção de estilos em tempo real)
-
----
-
-## 📝 Créditos
+### 📝 Créditos
 
 Desenvolvido por **John Wiliam** com assistência de **IA**.
-*Focado para uso em Firefox 64-bit + Violentmonkey.*
