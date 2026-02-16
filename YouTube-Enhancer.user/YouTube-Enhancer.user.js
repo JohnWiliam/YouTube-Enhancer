@@ -592,7 +592,6 @@
                     .ytp-panel,
                     .ytp-popup.ytp-contextmenu {
                         background: #0f0f0f !important;
-                        background-color: #0f0f0f !important;
                         opacity: 0.96 !important;
                     }
                 `;
