@@ -616,6 +616,17 @@
                         background: var(--rtx-player-menu-background) !important;
                         background-color: var(--rtx-player-menu-background) !important;
                     }
+                    /* Mantém menus de perfil/notificações legíveis em tema escuro e claro */
+                    ytd-popup-container tp-yt-paper-dialog,
+                    ytd-multi-page-menu-renderer,
+                    ytd-notification-topbar-button-renderer tp-yt-paper-dialog,
+                    ytd-account-menu {
+                        --yt-spec-general-background-a: var(--yt-spec-base-background) !important;
+                        --yt-spec-general-background-b: var(--yt-spec-base-background) !important;
+                        --yt-spec-raised-background: var(--yt-spec-base-background) !important;
+                        background: var(--yt-spec-base-background) !important;
+                        background-color: var(--yt-spec-base-background) !important;
+                    }
                 `;
             }
 
