@@ -773,17 +773,48 @@
         config: null,
         observer: null,
         playerElement: null,
+        fullscreenHandler: null,
+        navigationHandler: null,
         
         init(config) {
             this.config = config;
-            this.playerElement = Utils.DOMCache.get('#movie_player') || 
-                                Utils.DOMCache.get('.html5-video-player');
+            this.resolvePlayerElement(true);
             this.createClock();
-            this.setupObserver();
             EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
-            document.addEventListener('fullscreenchange', () => this.handleFullscreen());
+            this.fullscreenHandler = () => this.handleFullscreen();
+            this.navigationHandler = () => {
+                this.resolvePlayerElement(true);
+                this.handleFullscreen();
+            };
+            document.addEventListener('fullscreenchange', this.fullscreenHandler);
+            document.addEventListener('yt-navigate-finish', this.navigationHandler);
             this.interval = setInterval(() => this.handleFullscreen(), 2000);
             log('Clock Manager inicializado');
+        },
+
+        resolvePlayerElement(force = false) {
+            const currentPlayer = this.playerElement;
+            if (!force && currentPlayer && currentPlayer.isConnected) {
+                return currentPlayer;
+            }
+
+            const resolvedPlayer = Utils.DOMCache.get('#movie_player', true) ||
+                                   Utils.DOMCache.get('.html5-video-player', true);
+
+            if (resolvedPlayer !== currentPlayer) {
+                if (this.observer) {
+                    this.observer.disconnect();
+                    this.observer = null;
+                }
+                this.playerElement = resolvedPlayer || null;
+                if (this.playerElement) {
+                    this.setupObserver();
+                }
+            } else if (!resolvedPlayer) {
+                this.playerElement = null;
+            }
+
+            return this.playerElement;
         },
         
         updateConfig(newConfig) {
@@ -810,6 +841,7 @@
         
         setupObserver() {
             if (!this.playerElement) return;
+            if (this.observer) this.observer.disconnect();
             this.observer = new MutationObserver(
                 Utils.debounce(() => this.adjustPosition(), 150)
             );
@@ -817,7 +849,11 @@
         },
         
         adjustPosition() {
-            if (!this.clockElement || !this.playerElement) return;
+            if (!this.clockElement) return;
+            if (!this.playerElement || !this.playerElement.isConnected) {
+                this.resolvePlayerElement(true);
+            }
+            if (!this.playerElement) return;
             try {
                 const isFullscreen = document.fullscreenElement != null;
                 const areControlsVisible = !this.playerElement.classList.contains('ytp-autohide');
@@ -853,6 +889,11 @@
                 if (this.clockElement) this.clockElement.style.display = 'none';
                 return;
             }
+
+            if (!this.playerElement || !this.playerElement.isConnected) {
+                this.resolvePlayerElement(true);
+            }
+
             if (document.fullscreenElement) {
                 if (!this.clockElement) this.createClock();
                 this.clockElement.style.display = 'block';
@@ -869,6 +910,12 @@
             if (this.observer) this.observer.disconnect();
             if (this.interval) clearInterval(this.interval);
             if (this.timeInterval) clearInterval(this.timeInterval);
+            if (this.fullscreenHandler) document.removeEventListener('fullscreenchange', this.fullscreenHandler);
+            if (this.navigationHandler) document.removeEventListener('yt-navigate-finish', this.navigationHandler);
+            this.observer = null;
+            this.playerElement = null;
+            this.fullscreenHandler = null;
+            this.navigationHandler = null;
         }
     };
 
