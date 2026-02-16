@@ -31,8 +31,7 @@ Foque no conteúdo que importa. O script remove cirurgicamente todo o "ruído" d
 
 ### ⏰ 4. Relógio Flutuante Inteligente (Smart Clock)
 Um relógio elegante sobreposto ao vídeo em **Tela Cheia**, para que você não perca a hora durante maratonas.
-* **Modo Automático:** Aparece apenas em dias úteis (Seg-Sex) entre **13:00h e 15:00h** (ideal para horários de almoço/trabalho).
-* **Modo Forçado:** Pode ser configurado para ficar "Sempre Ligado" ou "Sempre Desligado".
+* **Ligado/Desligado:** com switch para habilitar ou desabilitar.
 * **Totalmente Estilizável:** Mude cores, opacidade, tamanho da fonte, margem e até o arredondamento das bordas.
 
 
