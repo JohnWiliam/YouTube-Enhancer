@@ -553,8 +553,13 @@
                     ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]),
                     ytd-reel-shelf-renderer,
                     ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]),
+                    ytd-guide-entry-renderer:has(a[href^="/shorts"]),
+                    ytd-guide-entry-renderer:has(a[href*="/shorts/"]),
+                    ytd-mini-guide-entry-renderer:has(a[href^="/shorts"]),
+                    ytd-mini-guide-entry-renderer:has(a[href*="/shorts/"]),
+                    /* Fallback textual selectors (secondary) */
                     ytd-guide-entry-renderer:has(a[title="Shorts"]),
-                    ytd-mini-guide-entry-renderer[aria-label="Shorts"] { 
+                    ytd-mini-guide-entry-renderer[aria-label="Shorts"] {
                         display: none !important; 
                     }
                 `;
@@ -726,9 +731,13 @@
                 if (card) elementsToHide.add(card);
             });
 
-            document.querySelectorAll('a[title="Shorts"], a[href^="/shorts"], a[href*="/shorts/"]').forEach((link) => {
+            document.querySelectorAll('a[href^="/shorts"], a[href*="/shorts/"], a[title="Shorts"], [aria-label="Shorts"]').forEach((link) => {
                 const entry = link.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item');
                 if (entry) elementsToHide.add(entry);
+            });
+
+            document.querySelectorAll('ytd-reel-item-renderer, ytd-rich-item-renderer:has(a[href^="/shorts/"])').forEach((item) => {
+                elementsToHide.add(item);
             });
 
             elementsToHide.forEach((element) => this.markHidden(element));
