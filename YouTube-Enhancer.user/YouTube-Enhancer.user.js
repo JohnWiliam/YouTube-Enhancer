@@ -730,6 +730,8 @@
             pause: null,
             ended: null
         },
+        mainMediaElement: null,
+        mediaStatePoller: null,
         rafFallbackTimers: new Map(),
         rafFallbackId: 0,
         gracePeriodTimer: null,
@@ -769,7 +771,40 @@
             this.rafFallbackTimers.forEach((timeoutId) => clearTimeout(timeoutId));
             this.rafFallbackTimers.clear();
 
+            if (this.mediaStatePoller) clearInterval(this.mediaStatePoller);
+            this.mediaStatePoller = null;
+            this.mainMediaElement = null;
+
             this.initialized = false;
+        },
+
+        resolveMainMediaElement(force = false) {
+            const currentMainMedia = this.mainMediaElement;
+            if (!force && currentMainMedia && currentMainMedia.isConnected) {
+                return currentMainMedia;
+            }
+
+            const mainMedia = Utils.DOMCache.get('#movie_player video.html5-main-video', true) ||
+                              Utils.DOMCache.get('.html5-video-player video.html5-main-video', true) ||
+                              Utils.DOMCache.get('#movie_player video', true);
+
+            this.mainMediaElement = mainMedia || null;
+            return this.mainMediaElement;
+        },
+
+        isMainPlayerMediaEventTarget(target) {
+            if (!(target instanceof HTMLMediaElement)) return false;
+            if (!target.isConnected) return false;
+
+            const mainMedia = this.resolveMainMediaElement();
+            if (!mainMedia) return false;
+
+            return target === mainMedia;
+        },
+
+        refreshPlayingFromMainMedia() {
+            const mainMedia = this.resolveMainMediaElement(true);
+            this.state.playing = !!(mainMedia && !mainMedia.paused && !mainMedia.ended && mainMedia.readyState > 2);
         },
 
         bindEvents() {
@@ -793,17 +828,38 @@
             };
             document.addEventListener('visibilitychange', this.handlers.visibility);
 
-            this.handlers.play = () => { this.state.playing = true; this.updateState(); };
-            this.handlers.pause = () => { this.state.playing = false; this.updateState(); };
-            this.handlers.ended = this.handlers.pause;
+            this.handlers.play = (event) => {
+                if (!this.isMainPlayerMediaEventTarget(event.target)) return;
+                this.state.playing = true;
+                this.updateState();
+            };
+            this.handlers.pause = (event) => {
+                if (!this.isMainPlayerMediaEventTarget(event.target)) return;
+                this.state.playing = false;
+                this.updateState();
+            };
+            this.handlers.ended = (event) => {
+                if (!this.isMainPlayerMediaEventTarget(event.target)) return;
+                this.state.playing = false;
+                this.updateState();
+            };
             document.addEventListener('play', this.handlers.play, true);
             document.addEventListener('pause', this.handlers.pause, true);
             document.addEventListener('ended', this.handlers.ended, true);
 
+            this.mediaStatePoller = setInterval(() => {
+                const wasPlaying = this.state.playing;
+                this.refreshPlayingFromMainMedia();
+                if (wasPlaying !== this.state.playing) this.updateState();
+            }, 1500);
+
             this.state.hidden = document.visibilityState === 'hidden';
+            this.refreshPlayingFromMainMedia();
         },
 
         updateState(forceOptimization = false) {
+            this.refreshPlayingFromMainMedia();
+
             // Se ainda estiver no periodo de carência e oculto, tratamos como nível 0 (Normal)
             const isGracePeriodActive = this.state.hidden && !forceOptimization && this.gracePeriodTimer;
 
