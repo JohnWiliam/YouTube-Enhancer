@@ -84,6 +84,8 @@
                 CLOCK_STYLE: { ...defaults.CLOCK_STYLE, ...(config?.CLOCK_STYLE || {}) }
             };
 
+            safeConfig.LANGUAGE = ['pt', 'en'].includes(safeConfig.LANGUAGE) ? safeConfig.LANGUAGE : defaults.LANGUAGE;
+
             safeConfig.VIDEOS_PER_ROW = this.clamp(safeConfig.VIDEOS_PER_ROW, 3, 8, defaults.VIDEOS_PER_ROW);
             safeConfig.CLOCK_STYLE.bgOpacity = this.clamp(safeConfig.CLOCK_STYLE.bgOpacity, 0, 1, defaults.CLOCK_STYLE.bgOpacity);
             safeConfig.CLOCK_STYLE.fontSize = this.clamp(safeConfig.CLOCK_STYLE.fontSize, 12, 48, defaults.CLOCK_STYLE.fontSize);
@@ -447,6 +449,14 @@
                                         <span class="slider"></span>
                                     </div>
                                 </label>
+
+                                <div class="sub-option">
+                                    <label for="cfg-language">Idioma:</label>
+                                    <select id="cfg-language" class="styled-select">
+                                        <option value="pt" ${currentConfig.LANGUAGE === 'pt' ? 'selected' : ''}>Português</option>
+                                        <option value="en" ${currentConfig.LANGUAGE === 'en' ? 'selected' : ''}>English</option>
+                                    </select>
+                                </div>
                             </div>
                         </div>
 
@@ -578,6 +588,7 @@
 
             const getNewConfig = () => {
                 return Utils.sanitizeConfig({
+                    LANGUAGE: document.getElementById('cfg-language').value,
                     VIDEOS_PER_ROW: parseInt(document.getElementById('cfg-videos-row').value) || 5,
                     FEATURES: {
                         CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
