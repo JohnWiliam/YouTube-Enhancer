@@ -110,17 +110,31 @@
             };
         },
 
+        // =======================================================
+        // CORREÇÃO: DOMCache Inteligente (Previne Memory Leak)
+        // =======================================================
         DOMCache: {
             cache: new Map(),
             observers: new Map(),
             
             get(selector, forceUpdate = false) {
-                if (forceUpdate || !this.cache.has(selector)) {
-                    const element = document.querySelector(selector);
-                    this.cache.set(selector, element);
-                    return element;
+                // 1. Tenta pegar do cache
+                if (!forceUpdate && this.cache.has(selector)) {
+                    const cachedEl = this.cache.get(selector);
+                    // 2. CORREÇÃO CRÍTICA: Verifica se o elemento ainda existe na página (SPA)
+                    if (cachedEl && cachedEl.isConnected) {
+                        return cachedEl;
+                    }
+                    // Se não estiver conectado, é lixo. Remove.
+                    this.cache.delete(selector);
                 }
-                return this.cache.get(selector);
+
+                // 3. Busca novo elemento se necessário
+                const element = document.querySelector(selector);
+                if (element) {
+                    this.cache.set(selector, element);
+                }
+                return element;
             },
             
             refresh(selector = null) {
@@ -128,6 +142,7 @@
                     this.cache.delete(selector);
                 } else {
                     this.cache.clear();
+                    log('Cache DOM limpo (Navegação SPA detectada)');
                 }
             },
             
@@ -174,11 +189,11 @@
     // 1. CONFIG MANAGER
     // =======================================================
     const ConfigManager = {
-        CONFIG_VERSION: '1.1.7',
+        CONFIG_VERSION: '1.1.8',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         
         defaults: {
-            version: '1.1.7',
+            version: '1.1.8',
             VIDEOS_PER_ROW: 5,
             FEATURES: {
                 CPU_TAMER: true,
@@ -510,6 +525,11 @@
         },
         
         apply: function(config) {
+            // CORREÇÃO: Garante que document.head existe
+            if (!document.head) {
+                return requestAnimationFrame(() => this.apply(config));
+            }
+
             const old = document.getElementById(this.styleId);
             if (old) old.remove();
 
@@ -709,7 +729,7 @@
     };
 
     // =======================================================
-    // 4. SMART CPU TAMER CORRIGIDO (COM GRACE PERIOD E SOFT-THROTTLE)
+    // 4. SMART CPU TAMER CORRIGIDO (COM CONTEXTO SAFE & SOFT-THROTTLE)
     // =======================================================
     const SmartCpuTamer = {
         initialized: false,
@@ -735,7 +755,7 @@
         rafFallbackTimers: new Map(),
         rafFallbackId: 0,
         gracePeriodTimer: null,
-        GRACE_PERIOD_MS: 30000, // 30 segundos antes de ativar otimização pesada
+        GRACE_PERIOD_MS: 30000, 
         
         init() {
             if (this.initialized) return;
@@ -748,7 +768,7 @@
             this.bindEvents();
             this.overrideTimers();
             this.initialized = true;
-            log('Smart CPU Tamer v2.1 Ativado (Soft Throttle + Grace Period)');
+            log('Smart CPU Tamer v2.2 Ativado (Context Safe + Soft Throttle)');
             this.updateState();
         },
 
@@ -810,16 +830,14 @@
         bindEvents() {
             this.handlers.visibility = () => {
                 if (document.visibilityState === 'hidden') {
-                    // Entrou em background: Inicia contagem de carência
                     this.state.hidden = true;
                     if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
                     this.gracePeriodTimer = setTimeout(() => {
                         this.gracePeriodTimer = null;
                         log('Grace Period terminou. Ativando otimização.');
-                        this.updateState(true); // Força update após carência
+                        this.updateState(true); 
                     }, this.GRACE_PERIOD_MS);
                 } else {
-                    // Voltou para a aba: Recuperação IMEDIATA
                     this.state.hidden = false;
                     if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
                     this.gracePeriodTimer = null;
@@ -860,15 +878,14 @@
         updateState(forceOptimization = false) {
             this.refreshPlayingFromMainMedia();
 
-            // Se ainda estiver no periodo de carência e oculto, tratamos como nível 0 (Normal)
             const isGracePeriodActive = this.state.hidden && !forceOptimization && this.gracePeriodTimer;
 
             if (!this.state.hidden || isGracePeriodActive) {
-                this.state.throttlingLevel = 0; // Performance Máxima
+                this.state.throttlingLevel = 0; 
             } else if (this.state.playing) {
-                this.state.throttlingLevel = 1; // Áudio Background
+                this.state.throttlingLevel = 1; 
             } else {
-                this.state.throttlingLevel = 2; // Hibernação
+                this.state.throttlingLevel = 2; 
             }
         },
 
@@ -879,12 +896,13 @@
                 return Number.isFinite(parsedDelay) ? parsedDelay : 0;
             };
 
+            // CORREÇÃO: Uso de .apply(targetWindow) para manter contexto
             targetWindow.setInterval = function(callback, delay, ...args) {
                 const parsedDelay = normalizeDelay(delay);
                 let actualDelay = parsedDelay;
                 if (self.state.throttlingLevel === 2) actualDelay = Math.max(parsedDelay, 5000); 
                 else if (self.state.throttlingLevel === 1) actualDelay = Math.max(parsedDelay, 1000); 
-                return self.originals.setInterval.call(this, callback, actualDelay, ...args);
+                return self.originals.setInterval.apply(targetWindow, [callback, actualDelay, ...args]);
             };
 
             targetWindow.setTimeout = function(callback, delay, ...args) {
@@ -892,22 +910,27 @@
                 let actualDelay = parsedDelay;
                 if (self.state.throttlingLevel === 2) actualDelay = Math.max(parsedDelay, 2000);
                 else if (self.state.throttlingLevel === 1) actualDelay = Math.max(parsedDelay, 250); 
-                return self.originals.setTimeout.call(this, callback, actualDelay, ...args);
+                return self.originals.setTimeout.apply(targetWindow, [callback, actualDelay, ...args]);
             };
 
-            // CORREÇÃO CRÍTICA AQUI:
+            // CORREÇÃO: Lógica de FPS suave (Soft Throttle) + Timestamp fix
             targetWindow.requestAnimationFrame = function(callback) {
                 if (self.state.throttlingLevel > 0) {
                     const fallbackId = ++self.rafFallbackId;
-                    const timeoutId = self.originals.setTimeout.call(this, () => {
+                    
+                    // Nível 1 (Música): 30 FPS (33ms) para não travar UI/Legendas
+                    // Nível 2 (Hibernação): 1 FPS (1000ms)
+                    const throttleDelay = self.state.throttlingLevel === 1 ? 33 : 1000;
+
+                    const timeoutId = self.originals.setTimeout.call(targetWindow, () => {
                         self.rafFallbackTimers.delete(fallbackId);
-                        // Passamos o timestamp para o callback, como o rAF real faria
                         callback(performance.now());
-                    }, 1000); 
+                    }, throttleDelay); 
+                    
                     self.rafFallbackTimers.set(fallbackId, timeoutId);
                     return fallbackId;
                 }
-                return self.originals.requestAnimationFrame.call(this, callback);
+                return self.originals.requestAnimationFrame.call(targetWindow, callback);
             };
 
             targetWindow.cancelAnimationFrame = function(id) {
@@ -917,7 +940,7 @@
                     return clearTimeout(timeoutId);
                 }
                 if (typeof self.originals.cancelAnimationFrame === 'function') {
-                    return self.originals.cancelAnimationFrame.call(this, id);
+                    return self.originals.cancelAnimationFrame.call(targetWindow, id);
                 }
                 return clearTimeout(id);
             };
@@ -1084,13 +1107,17 @@
     // =======================================================
     function init() {
         try {
+            // CORREÇÃO: Limpeza preventiva de cache ao navegar (SPA)
+            Utils.safeAddEventListener(document, 'yt-navigate-start', () => {
+                Utils.DOMCache.refresh();
+            });
+
             // Configuração inicial para carregar os módulos
             const config = ConfigManager.load();
             if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init();
             
-            // CORREÇÃO (v1.1.5): Recarrega a config fresca ao abrir o menu
             GM_registerMenuCommand('⚙️ Configurações', () => {
-                const currentConfig = ConfigManager.load(); // <--- Leitura fresca aqui
+                const currentConfig = ConfigManager.load();
                 UIManager.createSettingsModal(currentConfig, (newConfig) => ConfigManager.save(newConfig));
             });
             
@@ -1104,7 +1131,7 @@
                 else if (!newConfig.FEATURES.CPU_TAMER && SmartCpuTamer.initialized) SmartCpuTamer.cleanup();
             });
             
-            log(`v${ConfigManager.CONFIG_VERSION} Carregado com Smart CPU Tamer v2.1`);
+            log(`v${ConfigManager.CONFIG_VERSION} Carregado com Smart CPU Tamer v2.2`);
             
             Utils.safeAddEventListener(window, 'beforeunload', () => {
                 SmartCpuTamer.cleanup();
