@@ -208,7 +208,8 @@
                         title: 'Layout Grid',
                         description: 'Ajusta vídeos por linha'
                     },
-                    videosPerRow: 'Vídeos por linha:',
+                    videosPerRow: 'Vídeos por linha',
+                    videosPerRowHint: 'Define quantos vídeos aparecem em cada linha (3 a 8)',
                     shorts: {
                         title: 'Remover Shorts',
                         description: 'Limpa Shorts da interface'
@@ -261,7 +262,8 @@
                         title: 'Grid Layout',
                         description: 'Adjusts videos per row'
                     },
-                    videosPerRow: 'Videos per row:',
+                    videosPerRow: 'Videos per row',
+                    videosPerRowHint: 'Defines how many videos appear in each row (3 to 8)',
                     shorts: {
                         title: 'Remove Shorts',
                         description: 'Cleans Shorts from the interface'
@@ -422,10 +424,13 @@
                                     </div>
                                 </label>
 
-                                <div id="layout-settings" class="sub-option" style="${!currentConfig.FEATURES.LAYOUT_ENHANCEMENT ? 'display:none' : ''}">
-                                    <label>${t('modal.features.videosPerRow', currentConfig.LANGUAGE)}</label>
+                                <label id="layout-settings" class="feature-toggle feature-card-input" style="${!currentConfig.FEATURES.LAYOUT_ENHANCEMENT ? 'display:none' : ''}" for="cfg-videos-row">
+                                    <div class="toggle-text">
+                                        <strong>${t('modal.features.videosPerRow', currentConfig.LANGUAGE)}</strong>
+                                        <span>${t('modal.features.videosPerRowHint', currentConfig.LANGUAGE)}</span>
+                                    </div>
                                     <input type="number" id="cfg-videos-row" min="3" max="8" value="${currentConfig.VIDEOS_PER_ROW}" class="styled-input-small">
-                                </div>
+                                </label>
 
                                 <label class="feature-toggle">
                                     <div class="toggle-text">
@@ -553,7 +558,6 @@
                     .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; }
                     input:checked + .slider { background-color: #3ea6ff; }
                     input:checked + .slider:before { transform: translateX(18px); }
-                    .sub-option { margin: -5px 0 10px 10px; padding: 10px; border-left: 2px solid #333; display: flex; align-items: center; gap: 10px; color: #ccc; }
                     .appearance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
                     .control-group { display: flex; flex-direction: column; gap: 8px; }
                     .styled-input, .styled-select { background: #1a1a1a; border: 1px solid #333; color: white; padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box; }
