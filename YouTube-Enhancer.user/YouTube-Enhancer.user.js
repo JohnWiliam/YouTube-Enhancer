@@ -604,6 +604,108 @@
         }
     };
 
+    const ShortsManager = {
+        observer: null,
+        listenersCleanup: [],
+        hiddenElements: new Set(),
+        enabled: false,
+
+        debouncedPrune: Utils.debounce(function() {
+            if (this.enabled) this.prune();
+        }, 150),
+
+        init(config) {
+            this.updateConfig(config);
+            EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
+        },
+
+        updateConfig(config) {
+            const shouldEnable = Boolean(config?.FEATURES?.SHORTS_REMOVAL);
+            if (shouldEnable === this.enabled) return;
+
+            this.enabled = shouldEnable;
+            if (this.enabled) {
+                this.start();
+            } else {
+                this.stop();
+            }
+        },
+
+        start() {
+            if (!document.documentElement) return;
+            this.prune();
+
+            if (!this.observer) {
+                this.observer = new MutationObserver(() => this.debouncedPrune());
+                this.observer.observe(document.documentElement, { childList: true, subtree: true });
+            }
+
+            if (this.listenersCleanup.length === 0) {
+                this.listenersCleanup.push(
+                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()),
+                    Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune())
+                );
+            }
+        },
+
+        stop() {
+            if (this.observer) {
+                this.observer.disconnect();
+                this.observer = null;
+            }
+
+            this.listenersCleanup.forEach((cleanup) => cleanup());
+            this.listenersCleanup = [];
+            this.restoreHiddenElements();
+        },
+
+        markHidden(element) {
+            if (!(element instanceof HTMLElement) || this.hiddenElements.has(element)) return;
+            element.dataset.ytEnhancerPrevDisplay = element.style.display || '';
+            element.style.setProperty('display', 'none', 'important');
+            this.hiddenElements.add(element);
+        },
+
+        restoreHiddenElements() {
+            for (const element of this.hiddenElements) {
+                if (!(element instanceof HTMLElement)) continue;
+                const previousDisplay = element.dataset.ytEnhancerPrevDisplay || '';
+                if (previousDisplay) element.style.display = previousDisplay;
+                else element.style.removeProperty('display');
+                delete element.dataset.ytEnhancerPrevDisplay;
+            }
+            this.hiddenElements.clear();
+        },
+
+        prune() {
+            const elementsToHide = new Set();
+
+            document.querySelectorAll('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach((node) => {
+                elementsToHide.add(node);
+                const section = node.closest('ytd-rich-section-renderer');
+                if (section) elementsToHide.add(section);
+            });
+
+            document.querySelectorAll('ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach((marker) => {
+                const card = marker.closest(
+                    'ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-item-section-renderer'
+                );
+                if (card) elementsToHide.add(card);
+            });
+
+            document.querySelectorAll('a[title="Shorts"], a[href^="/shorts"], a[href*="/shorts/"]').forEach((link) => {
+                const entry = link.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item');
+                if (entry) elementsToHide.add(entry);
+            });
+
+            elementsToHide.forEach((element) => this.markHidden(element));
+        },
+
+        cleanup() {
+            this.stop();
+        }
+    };
+
     // =======================================================
     // 4. SMART CPU TAMER CORRIGIDO (COM GRACE PERIOD E SOFT-THROTTLE)
     // =======================================================
@@ -935,6 +1037,7 @@
             });
             
             StyleManager.init();
+            ShortsManager.init(config);
             ClockManager.init(config);
             StyleManager.apply(config);
             
@@ -948,6 +1051,7 @@
             Utils.safeAddEventListener(window, 'beforeunload', () => {
                 SmartCpuTamer.cleanup();
                 ClockManager.cleanup();
+                ShortsManager.cleanup();
                 Utils.DOMCache.refresh();
             });
             
