@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      1.1.7
+// @version      2.0.0
 // @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts, elimina blur/translucidez e adiciona relógio customizável.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
@@ -18,7 +18,7 @@
 (function() {
     'use strict';
 
-    const FLAG = "__yt_enhancer_v1_1_7__";
+    const FLAG = "__yt_enhancer_v2_0_0__";
     if (window[FLAG]) return;
     window[FLAG] = true;
 
@@ -172,7 +172,7 @@
             return () => element.removeEventListener(event, safeHandler, options);
         },
 
-        migrateConfig(savedConfig, currentVersion = '1.1.7') {
+        migrateConfig(savedConfig, currentVersion = '2.0.0') {
             if (!savedConfig || typeof savedConfig !== 'object') {
                 return null;
             }
@@ -220,6 +220,10 @@
                     rtx: {
                         title: 'Modo RTX (sem blur/translucidez)',
                         description: 'Remove blur e transforma fundos translúcidos em transparentes'
+                    },
+                    language: {
+                        title: 'Idioma da Interface',
+                        description: 'Troca os textos entre português e inglês'
                     }
                 },
                 clockStyle: {
@@ -233,7 +237,8 @@
                 buttons: {
                     apply: 'Aplicar',
                     applyAndReload: 'Aplicar e Recarregar'
-                }
+                },
+                reloadNotice: 'Mudanças de idioma e CPU exigem recarregar a página para aplicar.'
             },
             menu: {
                 openSettings: '⚙️ Configurações'
@@ -268,6 +273,10 @@
                     rtx: {
                         title: 'RTX Mode (no blur/translucency)',
                         description: 'Removes blur and turns translucent backgrounds transparent'
+                    },
+                    language: {
+                        title: 'Interface Language',
+                        description: 'Switch all texts between English and Portuguese'
                     }
                 },
                 clockStyle: {
@@ -281,7 +290,8 @@
                 buttons: {
                     apply: 'Apply',
                     applyAndReload: 'Apply and Reload'
-                }
+                },
+                reloadNotice: 'Language and CPU changes require reloading the page to apply.'
             },
             menu: {
                 openSettings: '⚙️ Settings'
@@ -290,20 +300,20 @@
     };
 
     const t = (key, lang = null) => {
-        const resolvedLang = (lang || ConfigManager.load()?.LANGUAGE || 'pt').toLowerCase();
+        const resolvedLang = (lang || ConfigManager.load()?.LANGUAGE || 'en').toLowerCase();
         const segments = key.split('.');
         const getValue = (dictionary) => segments.reduce((acc, segment) => acc?.[segment], dictionary);
 
-        return getValue(I18N[resolvedLang]) ?? getValue(I18N.pt) ?? key;
+        return getValue(I18N[resolvedLang]) ?? getValue(I18N.en) ?? getValue(I18N.pt) ?? key;
     };
 
     const ConfigManager = {
-        CONFIG_VERSION: '1.1.8',
+        CONFIG_VERSION: '2.0.0',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         
         defaults: {
-            version: '1.1.8',
-            LANGUAGE: 'pt',
+            version: '2.0.0',
+            LANGUAGE: 'en',
             VIDEOS_PER_ROW: 5,
             FEATURES: {
                 CPU_TAMER: true,
@@ -450,13 +460,16 @@
                                     </div>
                                 </label>
 
-                                <div class="sub-option">
-                                    <label for="cfg-language">Idioma:</label>
+                                <label class="feature-toggle feature-card-select" for="cfg-language">
+                                    <div class="toggle-text">
+                                        <strong>${t('modal.features.language.title', currentConfig.LANGUAGE)}</strong>
+                                        <span>${t('modal.features.language.description', currentConfig.LANGUAGE)}</span>
+                                    </div>
                                     <select id="cfg-language" class="styled-select">
-                                        <option value="pt" ${currentConfig.LANGUAGE === 'pt' ? 'selected' : ''}>Português</option>
                                         <option value="en" ${currentConfig.LANGUAGE === 'en' ? 'selected' : ''}>English</option>
+                                        <option value="pt" ${currentConfig.LANGUAGE === 'pt' ? 'selected' : ''}>Português</option>
                                     </select>
-                                </div>
+                                </label>
                             </div>
                         </div>
 
@@ -497,6 +510,7 @@
                     </div>
 
                     <div class="modal-footer">
+                        <p id="yt-enhancer-reload-note" class="reload-note" style="display: none;">${t('modal.reloadNotice', currentConfig.LANGUAGE)}</p>
                         <button id="yt-enhancer-apply" class="btn btn-primary">${t('modal.buttons.apply', currentConfig.LANGUAGE)}</button>
                         <button id="yt-enhancer-reload" class="btn btn-primary" style="display: none;">${t('modal.buttons.applyAndReload', currentConfig.LANGUAGE)}</button>
                     </div>
@@ -529,6 +543,8 @@
                     .options-list { display: flex; flex-direction: column; gap: 15px; }
                     .feature-toggle { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #1e1e1e; border-radius: 8px; cursor: pointer; }
                     .feature-toggle:hover { background: #252525; }
+                    .feature-card-select { gap: 16px; }
+                    .feature-card-select .styled-select { max-width: 140px; }
                     .toggle-text strong { display: block; font-size: 14px; margin-bottom: 2px; }
                     .toggle-text span { font-size: 12px; color: #aaa; }
                     .toggle-switch { position: relative; width: 40px; height: 22px; }
@@ -544,7 +560,8 @@
                     .styled-input-small { width: 60px; padding: 5px; background: #222; border: 1px solid #444; color: white; border-radius: 4px; text-align: center; }
                     .color-input-wrapper { display: flex; align-items: center; gap: 10px; background: #1a1a1a; padding: 5px; border: 1px solid #333; border-radius: 6px; }
                     input[type="color"] { border: none; width: 30px; height: 30px; padding: 0; background: none; cursor: pointer; }
-                    .modal-footer { padding: 15px 20px; border-top: 1px solid #333; display: flex; justify-content: flex-end; gap: 10px; }
+                    .modal-footer { padding: 15px 20px; border-top: 1px solid #333; display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 10px; }
+                    .reload-note { margin: 0; color: #f6cf6a; font-size: 12px; flex: 1 1 100%; }
                     .btn { padding: 8px 20px; border: none; border-radius: 18px; cursor: pointer; font-weight: 500; }
                     .btn-primary { background: #3ea6ff; color: #000; }
                     .btn-primary:hover { opacity: 0.9; }
@@ -611,14 +628,26 @@
 
             const btnApply = document.getElementById('yt-enhancer-apply');
             const btnReload = document.getElementById('yt-enhancer-reload');
+            const reloadNotice = document.getElementById('yt-enhancer-reload-note');
             const cpuToggle = document.getElementById('cfg-cpu-tamer');
+            const languageSelect = document.getElementById('cfg-language');
             const initialCpuState = currentConfig.FEATURES.CPU_TAMER;
+            const initialLanguageState = currentConfig.LANGUAGE;
 
-            this.cleanupFunctions.push(Utils.safeAddEventListener(cpuToggle, 'change', () => {
-                const changed = cpuToggle.checked !== initialCpuState;
-                btnApply.style.display = changed ? 'none' : 'block';
-                btnReload.style.display = changed ? 'block' : 'none';
-            }));
+            const updateSaveButtons = () => {
+                const newConfig = getNewConfig();
+                const requiresReload = (
+                    newConfig.FEATURES.CPU_TAMER !== initialCpuState ||
+                    newConfig.LANGUAGE !== initialLanguageState
+                );
+
+                btnApply.style.display = requiresReload ? 'none' : 'block';
+                btnReload.style.display = requiresReload ? 'block' : 'none';
+                reloadNotice.style.display = requiresReload ? 'block' : 'none';
+            };
+
+            this.cleanupFunctions.push(Utils.safeAddEventListener(cpuToggle, 'change', updateSaveButtons));
+            this.cleanupFunctions.push(Utils.safeAddEventListener(languageSelect, 'change', updateSaveButtons));
 
             this.cleanupFunctions.push(Utils.safeAddEventListener(btnApply, 'click', () => {
                 onSave(getNewConfig());
