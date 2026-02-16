@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      1.1.5
-// @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts e adiciona relógio customizável.
+// @version      1.1.7
+// @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts, elimina blur/translucidez e adiciona relógio customizável.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=youtube.com
@@ -18,7 +18,7 @@
 (function() {
     'use strict';
 
-    const FLAG = "__yt_enhancer_v1_1_5__";
+    const FLAG = "__yt_enhancer_v1_1_7__";
     if (window[FLAG]) return;
     window[FLAG] = true;
 
@@ -66,6 +66,35 @@
     // UTILITÁRIOS
     // =======================================================
     const Utils = {
+        clamp(value, min, max, fallback = min) {
+            const numeric = Number(value);
+            if (!Number.isFinite(numeric)) return fallback;
+            return Math.min(max, Math.max(min, numeric));
+        },
+
+        isHexColor(value) {
+            return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
+        },
+
+        sanitizeConfig(config, defaults) {
+            const safeConfig = {
+                ...defaults,
+                ...(config || {}),
+                FEATURES: { ...defaults.FEATURES, ...(config?.FEATURES || {}) },
+                CLOCK_STYLE: { ...defaults.CLOCK_STYLE, ...(config?.CLOCK_STYLE || {}) }
+            };
+
+            safeConfig.VIDEOS_PER_ROW = this.clamp(safeConfig.VIDEOS_PER_ROW, 3, 8, defaults.VIDEOS_PER_ROW);
+            safeConfig.CLOCK_STYLE.bgOpacity = this.clamp(safeConfig.CLOCK_STYLE.bgOpacity, 0, 1, defaults.CLOCK_STYLE.bgOpacity);
+            safeConfig.CLOCK_STYLE.fontSize = this.clamp(safeConfig.CLOCK_STYLE.fontSize, 12, 48, defaults.CLOCK_STYLE.fontSize);
+            safeConfig.CLOCK_STYLE.margin = this.clamp(safeConfig.CLOCK_STYLE.margin, 0, 120, defaults.CLOCK_STYLE.margin);
+            safeConfig.CLOCK_STYLE.borderRadius = this.clamp(safeConfig.CLOCK_STYLE.borderRadius, 0, 50, defaults.CLOCK_STYLE.borderRadius);
+            safeConfig.CLOCK_STYLE.color = this.isHexColor(safeConfig.CLOCK_STYLE.color) ? safeConfig.CLOCK_STYLE.color : defaults.CLOCK_STYLE.color;
+            safeConfig.CLOCK_STYLE.bgColor = this.isHexColor(safeConfig.CLOCK_STYLE.bgColor) ? safeConfig.CLOCK_STYLE.bgColor : defaults.CLOCK_STYLE.bgColor;
+
+            return safeConfig;
+        },
+
         debounce(func, wait, immediate = false) {
             let timeout;
             return function(...args) {
@@ -81,17 +110,31 @@
             };
         },
 
+        // =======================================================
+        // CORREÇÃO: DOMCache Inteligente (Previne Memory Leak)
+        // =======================================================
         DOMCache: {
             cache: new Map(),
             observers: new Map(),
             
             get(selector, forceUpdate = false) {
-                if (forceUpdate || !this.cache.has(selector)) {
-                    const element = document.querySelector(selector);
-                    this.cache.set(selector, element);
-                    return element;
+                // 1. Tenta pegar do cache
+                if (!forceUpdate && this.cache.has(selector)) {
+                    const cachedEl = this.cache.get(selector);
+                    // 2. CORREÇÃO CRÍTICA: Verifica se o elemento ainda existe na página (SPA)
+                    if (cachedEl && cachedEl.isConnected) {
+                        return cachedEl;
+                    }
+                    // Se não estiver conectado, é lixo. Remove.
+                    this.cache.delete(selector);
                 }
-                return this.cache.get(selector);
+
+                // 3. Busca novo elemento se necessário
+                const element = document.querySelector(selector);
+                if (element) {
+                    this.cache.set(selector, element);
+                }
+                return element;
             },
             
             refresh(selector = null) {
@@ -99,6 +142,7 @@
                     this.cache.delete(selector);
                 } else {
                     this.cache.clear();
+                    log('Cache DOM limpo (Navegação SPA detectada)');
                 }
             },
             
@@ -126,7 +170,7 @@
             return () => element.removeEventListener(event, safeHandler, options);
         },
 
-        migrateConfig(savedConfig, currentVersion = '1.1.5') {
+        migrateConfig(savedConfig, currentVersion = '1.1.7') {
             if (!savedConfig || typeof savedConfig !== 'object') {
                 return null;
             }
@@ -145,17 +189,18 @@
     // 1. CONFIG MANAGER
     // =======================================================
     const ConfigManager = {
-        CONFIG_VERSION: '1.1.5',
+        CONFIG_VERSION: '1.1.8',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         
         defaults: {
-            version: '1.1.5',
+            version: '1.1.8',
             VIDEOS_PER_ROW: 5,
             FEATURES: {
                 CPU_TAMER: true,
                 LAYOUT_ENHANCEMENT: true,
                 SHORTS_REMOVAL: true,
-                FULLSCREEN_CLOCK: true
+                FULLSCREEN_CLOCK: true,
+                RTX_VISUAL_MODE: true
             },
             CLOCK_STYLE: {
                 color: '#ffffff',
@@ -174,26 +219,22 @@
                 const migratedConfig = Utils.migrateConfig(saved, this.CONFIG_VERSION);
                 
                 if (!migratedConfig) {
-                    return { ...this.defaults };
+                    return Utils.sanitizeConfig({}, this.defaults);
                 }
-                
-                const config = { ...this.defaults, ...migratedConfig };
-                config.FEATURES = { ...this.defaults.FEATURES, ...(migratedConfig.FEATURES || {}) };
-                config.CLOCK_STYLE = { ...this.defaults.CLOCK_STYLE, ...(migratedConfig.CLOCK_STYLE || {}) };
-                config.VIDEOS_PER_ROW = Math.max(3, Math.min(8, config.VIDEOS_PER_ROW));
-                
-                return config;
+
+                return Utils.sanitizeConfig(migratedConfig, this.defaults);
             } catch (error) {
                 log('Erro ao carregar configuração: ' + error);
-                return { ...this.defaults };
+                return Utils.sanitizeConfig({}, this.defaults);
             }
         },
 
         save: function(config) {
             try {
-                config.version = this.CONFIG_VERSION;
-                GM_setValue(this.STORAGE_KEY, config);
-                EventBus.emit('configChanged', config);
+                const sanitizedConfig = Utils.sanitizeConfig(config, this.defaults);
+                sanitizedConfig.version = this.CONFIG_VERSION;
+                GM_setValue(this.STORAGE_KEY, sanitizedConfig);
+                EventBus.emit('configChanged', sanitizedConfig);
                 return true;
             } catch (error) {
                 log('Erro ao salvar configuração: ' + error);
@@ -221,7 +262,7 @@
             overlay.id = 'yt-enhancer-overlay';
             overlay.style.cssText = `
                 position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                background: rgba(0,0,0,0.6); z-index: 9998; backdrop-filter: blur(4px);
+                background: rgba(0,0,0,0.6); z-index: 9998;
             `;
 
             const modalHTML = `
@@ -284,6 +325,17 @@
                                     </div>
                                     <div class="toggle-switch">
                                         <input type="checkbox" id="cfg-clock-enable" ${currentConfig.FEATURES.FULLSCREEN_CLOCK ? 'checked' : ''}>
+                                        <span class="slider"></span>
+                                    </div>
+                                </label>
+
+                                <label class="feature-toggle">
+                                    <div class="toggle-text">
+                                        <strong>Modo RTX (sem blur/translucidez)</strong>
+                                        <span>Remove blur e transforma fundos translúcidos em transparentes</span>
+                                    </div>
+                                    <div class="toggle-switch">
+                                        <input type="checkbox" id="cfg-rtx-visual" ${currentConfig.FEATURES.RTX_VISUAL_MODE ? 'checked' : ''}>
                                         <span class="slider"></span>
                                     </div>
                                 </label>
@@ -417,13 +469,14 @@
             });
 
             const getNewConfig = () => {
-                return {
+                return Utils.sanitizeConfig({
                     VIDEOS_PER_ROW: parseInt(document.getElementById('cfg-videos-row').value) || 5,
                     FEATURES: {
                         CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
                         LAYOUT_ENHANCEMENT: document.getElementById('cfg-layout').checked,
                         SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked,
-                        FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked
+                        FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked,
+                        RTX_VISUAL_MODE: document.getElementById('cfg-rtx-visual').checked
                     },
                     CLOCK_STYLE: {
                         color: document.getElementById('style-color').value,
@@ -434,7 +487,7 @@
                         borderRadius: parseInt(document.getElementById('style-border-radius').value),
                         position: 'bottom-right'
                     }
-                };
+                }, ConfigManager.defaults);
             };
 
             const btnApply = document.getElementById('yt-enhancer-apply');
@@ -472,10 +525,15 @@
         },
         
         apply: function(config) {
+            // CORREÇÃO: Garante que document.head existe
+            if (!document.head) {
+                return requestAnimationFrame(() => this.apply(config));
+            }
+
             const old = document.getElementById(this.styleId);
             if (old) old.remove();
 
-            if (!config.FEATURES.LAYOUT_ENHANCEMENT && !config.FEATURES.SHORTS_REMOVAL) return;
+            if (!config.FEATURES.LAYOUT_ENHANCEMENT && !config.FEATURES.SHORTS_REMOVAL && !config.FEATURES.RTX_VISUAL_MODE) return;
 
             let css = '';
             if (config.FEATURES.LAYOUT_ENHANCEMENT) {
@@ -501,6 +559,76 @@
                     }
                 `;
             }
+            if (config.FEATURES.RTX_VISUAL_MODE) {
+                css += `
+                    :root {
+                        --yt-spec-general-background-a: transparent !important;
+                        --yt-spec-general-background-b: transparent !important;
+                        --yt-spec-raised-background: transparent !important;
+                        --yt-spec-10-percent-layer: transparent !important;
+                        --yt-spec-badge-chip-background: transparent !important;
+                        --rtx-player-menu-background: rgba(15, 15, 15, 0.96) !important;
+                    }
+                    ytd-app *,
+                    tp-yt-iron-dropdown,
+                    tp-yt-paper-dialog,
+                    yt-confirm-dialog-renderer,
+                    ytd-popup-container,
+                    ytd-multi-page-menu-renderer,
+                    ytd-mini-guide-renderer,
+                    ytd-guide-renderer,
+                    ytd-searchbox,
+                    ytd-watch-flexy,
+                    ytd-live-chat-frame,
+                    .ytp-popup,
+                    .ytp-panel,
+                    .ytp-tooltip,
+                    .ytp-settings-menu,
+                    .ytp-menuitem,
+                    .iv-drawer,
+                    .sbdd_a,
+                    [style*="backdrop-filter"],
+                    [style*="-webkit-backdrop-filter"] {
+                        backdrop-filter: none !important;
+                        -webkit-backdrop-filter: none !important;
+                    }
+                    ytd-app [style*="rgba("],
+                    ytd-app [style*="rgb("],
+                    ytd-app [style*="background:"],
+                    ytd-app [style*="background-color:"] {
+                        background-image: none !important;
+                        box-shadow: none !important;
+                    }
+                    ytd-masthead,
+                    #guide,
+                    ytd-mini-guide-renderer,
+                    ytd-popup-container tp-yt-paper-dialog,
+                    ytd-multi-page-menu-renderer,
+                    tp-yt-iron-dropdown,
+                    .ytp-popup {
+                        background: transparent !important;
+                        background-color: transparent !important;
+                    }
+                    .ytp-settings-menu,
+                    .ytp-panel,
+                    .ytp-panel-menu,
+                    .ytp-popup.ytp-contextmenu {
+                        background: var(--rtx-player-menu-background) !important;
+                        background-color: var(--rtx-player-menu-background) !important;
+                    }
+                    /* Mantém menus de perfil/notificações legíveis em tema escuro e claro */
+                    ytd-popup-container tp-yt-paper-dialog,
+                    ytd-multi-page-menu-renderer,
+                    ytd-notification-topbar-button-renderer tp-yt-paper-dialog,
+                    ytd-account-menu {
+                        --yt-spec-general-background-a: var(--yt-spec-base-background) !important;
+                        --yt-spec-general-background-b: var(--yt-spec-base-background) !important;
+                        --yt-spec-raised-background: var(--yt-spec-base-background) !important;
+                        background: var(--yt-spec-base-background) !important;
+                        background-color: var(--yt-spec-base-background) !important;
+                    }
+                `;
+            }
 
             const style = document.createElement('style');
             style.id = this.styleId;
@@ -509,23 +637,136 @@
         }
     };
 
+    const ShortsManager = {
+        observer: null,
+        listenersCleanup: [],
+        hiddenElements: new Set(),
+        enabled: false,
+
+        debouncedPrune: Utils.debounce(function() {
+            if (this.enabled) this.prune();
+        }, 150),
+
+        init(config) {
+            this.updateConfig(config);
+            EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
+        },
+
+        updateConfig(config) {
+            const shouldEnable = Boolean(config?.FEATURES?.SHORTS_REMOVAL);
+            if (shouldEnable === this.enabled) return;
+
+            this.enabled = shouldEnable;
+            if (this.enabled) {
+                this.start();
+            } else {
+                this.stop();
+            }
+        },
+
+        start() {
+            if (!document.documentElement) return;
+            this.prune();
+
+            if (!this.observer) {
+                this.observer = new MutationObserver(() => this.debouncedPrune());
+                this.observer.observe(document.documentElement, { childList: true, subtree: true });
+            }
+
+            if (this.listenersCleanup.length === 0) {
+                this.listenersCleanup.push(
+                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()),
+                    Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune())
+                );
+            }
+        },
+
+        stop() {
+            if (this.observer) {
+                this.observer.disconnect();
+                this.observer = null;
+            }
+
+            this.listenersCleanup.forEach((cleanup) => cleanup());
+            this.listenersCleanup = [];
+            this.restoreHiddenElements();
+        },
+
+        markHidden(element) {
+            if (!(element instanceof HTMLElement) || this.hiddenElements.has(element)) return;
+            element.dataset.ytEnhancerPrevDisplay = element.style.display || '';
+            element.style.setProperty('display', 'none', 'important');
+            this.hiddenElements.add(element);
+        },
+
+        restoreHiddenElements() {
+            for (const element of this.hiddenElements) {
+                if (!(element instanceof HTMLElement)) continue;
+                const previousDisplay = element.dataset.ytEnhancerPrevDisplay || '';
+                if (previousDisplay) element.style.display = previousDisplay;
+                else element.style.removeProperty('display');
+                delete element.dataset.ytEnhancerPrevDisplay;
+            }
+            this.hiddenElements.clear();
+        },
+
+        prune() {
+            const elementsToHide = new Set();
+
+            document.querySelectorAll('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach((node) => {
+                elementsToHide.add(node);
+                const section = node.closest('ytd-rich-section-renderer');
+                if (section) elementsToHide.add(section);
+            });
+
+            document.querySelectorAll('ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach((marker) => {
+                const card = marker.closest(
+                    'ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-item-section-renderer'
+                );
+                if (card) elementsToHide.add(card);
+            });
+
+            document.querySelectorAll('a[title="Shorts"], a[href^="/shorts"], a[href*="/shorts/"]').forEach((link) => {
+                const entry = link.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item');
+                if (entry) elementsToHide.add(entry);
+            });
+
+            elementsToHide.forEach((element) => this.markHidden(element));
+        },
+
+        cleanup() {
+            this.stop();
+        }
+    };
+
     // =======================================================
-    // 4. SMART CPU TAMER CORRIGIDO (COM GRACE PERIOD E SOFT-THROTTLE)
+    // 4. SMART CPU TAMER CORRIGIDO (COM CONTEXTO SAFE & SOFT-THROTTLE)
     // =======================================================
     const SmartCpuTamer = {
         initialized: false,
         originals: {
             setInterval: null,
             setTimeout: null,
-            requestAnimationFrame: null
+            requestAnimationFrame: null,
+            cancelAnimationFrame: null
         },
         state: {
             hidden: false,
             playing: false,
             throttlingLevel: 0 
         },
+        handlers: {
+            visibility: null,
+            play: null,
+            pause: null,
+            ended: null
+        },
+        mainMediaElement: null,
+        mediaStatePoller: null,
+        rafFallbackTimers: new Map(),
+        rafFallbackId: 0,
         gracePeriodTimer: null,
-        GRACE_PERIOD_MS: 30000, // 30 segundos antes de ativar otimização pesada
+        GRACE_PERIOD_MS: 30000, 
         
         init() {
             if (this.initialized) return;
@@ -533,11 +774,12 @@
             this.originals.setInterval = targetWindow.setInterval;
             this.originals.setTimeout = targetWindow.setTimeout;
             this.originals.requestAnimationFrame = targetWindow.requestAnimationFrame;
+            this.originals.cancelAnimationFrame = targetWindow.cancelAnimationFrame;
 
             this.bindEvents();
             this.overrideTimers();
             this.initialized = true;
-            log('Smart CPU Tamer v2.1 Ativado (Soft Throttle + Grace Period)');
+            log('Smart CPU Tamer v2.2 Ativado (Context Safe + Soft Throttle)');
             this.updateState();
         },
 
@@ -546,78 +788,172 @@
             targetWindow.setInterval = this.originals.setInterval;
             targetWindow.setTimeout = this.originals.setTimeout;
             targetWindow.requestAnimationFrame = this.originals.requestAnimationFrame;
+            targetWindow.cancelAnimationFrame = this.originals.cancelAnimationFrame;
             
-            document.removeEventListener('visibilitychange', this.handleVisibility);
+            if (this.handlers.visibility) document.removeEventListener('visibilitychange', this.handlers.visibility);
+            if (this.handlers.play) document.removeEventListener('play', this.handlers.play, true);
+            if (this.handlers.pause) document.removeEventListener('pause', this.handlers.pause, true);
+            if (this.handlers.ended) document.removeEventListener('ended', this.handlers.ended, true);
+            this.handlers = { visibility: null, play: null, pause: null, ended: null };
+
             if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
+            this.gracePeriodTimer = null;
+
+            this.rafFallbackTimers.forEach((timeoutId) => clearTimeout(timeoutId));
+            this.rafFallbackTimers.clear();
+
+            if (this.mediaStatePoller) clearInterval(this.mediaStatePoller);
+            this.mediaStatePoller = null;
+            this.mainMediaElement = null;
+
             this.initialized = false;
         },
 
+        resolveMainMediaElement(force = false) {
+            const currentMainMedia = this.mainMediaElement;
+            if (!force && currentMainMedia && currentMainMedia.isConnected) {
+                return currentMainMedia;
+            }
+
+            const mainMedia = Utils.DOMCache.get('#movie_player video.html5-main-video', true) ||
+                              Utils.DOMCache.get('.html5-video-player video.html5-main-video', true) ||
+                              Utils.DOMCache.get('#movie_player video', true);
+
+            this.mainMediaElement = mainMedia || null;
+            return this.mainMediaElement;
+        },
+
+        isMainPlayerMediaEventTarget(target) {
+            if (!(target instanceof HTMLMediaElement)) return false;
+            if (!target.isConnected) return false;
+
+            const mainMedia = this.resolveMainMediaElement();
+            if (!mainMedia) return false;
+
+            return target === mainMedia;
+        },
+
+        refreshPlayingFromMainMedia() {
+            const mainMedia = this.resolveMainMediaElement(true);
+            this.state.playing = !!(mainMedia && !mainMedia.paused && !mainMedia.ended && mainMedia.readyState > 2);
+        },
+
         bindEvents() {
-            this.handleVisibility = () => {
+            this.handlers.visibility = () => {
                 if (document.visibilityState === 'hidden') {
-                    // Entrou em background: Inicia contagem de carência
                     this.state.hidden = true;
                     if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
                     this.gracePeriodTimer = setTimeout(() => {
+                        this.gracePeriodTimer = null;
                         log('Grace Period terminou. Ativando otimização.');
-                        this.updateState(true); // Força update após carência
+                        this.updateState(true); 
                     }, this.GRACE_PERIOD_MS);
                 } else {
-                    // Voltou para a aba: Recuperação IMEDIATA
                     this.state.hidden = false;
                     if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
+                    this.gracePeriodTimer = null;
                     this.updateState();
                 }
             };
-            document.addEventListener('visibilitychange', this.handleVisibility);
+            document.addEventListener('visibilitychange', this.handlers.visibility);
 
-            document.addEventListener('play', () => { this.state.playing = true; this.updateState(); }, true);
-            document.addEventListener('pause', () => { this.state.playing = false; this.updateState(); }, true);
-            document.addEventListener('ended', () => { this.state.playing = false; this.updateState(); }, true);
+            this.handlers.play = (event) => {
+                if (!this.isMainPlayerMediaEventTarget(event.target)) return;
+                this.state.playing = true;
+                this.updateState();
+            };
+            this.handlers.pause = (event) => {
+                if (!this.isMainPlayerMediaEventTarget(event.target)) return;
+                this.state.playing = false;
+                this.updateState();
+            };
+            this.handlers.ended = (event) => {
+                if (!this.isMainPlayerMediaEventTarget(event.target)) return;
+                this.state.playing = false;
+                this.updateState();
+            };
+            document.addEventListener('play', this.handlers.play, true);
+            document.addEventListener('pause', this.handlers.pause, true);
+            document.addEventListener('ended', this.handlers.ended, true);
+
+            this.mediaStatePoller = setInterval(() => {
+                const wasPlaying = this.state.playing;
+                this.refreshPlayingFromMainMedia();
+                if (wasPlaying !== this.state.playing) this.updateState();
+            }, 1500);
+
+            this.state.hidden = document.visibilityState === 'hidden';
+            this.refreshPlayingFromMainMedia();
         },
 
         updateState(forceOptimization = false) {
-            // Se ainda estiver no periodo de carência e oculto, tratamos como nível 0 (Normal)
+            this.refreshPlayingFromMainMedia();
+
             const isGracePeriodActive = this.state.hidden && !forceOptimization && this.gracePeriodTimer;
 
             if (!this.state.hidden || isGracePeriodActive) {
-                this.state.throttlingLevel = 0; // Performance Máxima
+                this.state.throttlingLevel = 0; 
             } else if (this.state.playing) {
-                this.state.throttlingLevel = 1; // Áudio Background
+                this.state.throttlingLevel = 1; 
             } else {
-                this.state.throttlingLevel = 2; // Hibernação
+                this.state.throttlingLevel = 2; 
             }
         },
 
         overrideTimers() {
             const self = this;
+            const normalizeDelay = (delay) => {
+                const parsedDelay = Number(delay);
+                return Number.isFinite(parsedDelay) ? parsedDelay : 0;
+            };
 
+            // CORREÇÃO: Uso de .apply(targetWindow) para manter contexto
             targetWindow.setInterval = function(callback, delay, ...args) {
-                let actualDelay = delay;
-                if (self.state.throttlingLevel === 2) actualDelay = Math.max(delay, 5000); 
-                else if (self.state.throttlingLevel === 1) actualDelay = Math.max(delay, 1000); 
-                return self.originals.setInterval.call(this, callback, actualDelay, ...args);
+                const parsedDelay = normalizeDelay(delay);
+                let actualDelay = parsedDelay;
+                if (self.state.throttlingLevel === 2) actualDelay = Math.max(parsedDelay, 5000); 
+                else if (self.state.throttlingLevel === 1) actualDelay = Math.max(parsedDelay, 1000); 
+                return self.originals.setInterval.apply(targetWindow, [callback, actualDelay, ...args]);
             };
 
             targetWindow.setTimeout = function(callback, delay, ...args) {
-                let actualDelay = delay;
-                if (self.state.throttlingLevel === 2) actualDelay = Math.max(delay, 2000);
-                else if (self.state.throttlingLevel === 1) actualDelay = Math.max(delay, 250); 
-                return self.originals.setTimeout.call(this, callback, actualDelay, ...args);
+                const parsedDelay = normalizeDelay(delay);
+                let actualDelay = parsedDelay;
+                if (self.state.throttlingLevel === 2) actualDelay = Math.max(parsedDelay, 2000);
+                else if (self.state.throttlingLevel === 1) actualDelay = Math.max(parsedDelay, 250); 
+                return self.originals.setTimeout.apply(targetWindow, [callback, actualDelay, ...args]);
             };
 
-            // CORREÇÃO CRÍTICA AQUI:
+            // CORREÇÃO: Lógica de FPS suave (Soft Throttle) + Timestamp fix
             targetWindow.requestAnimationFrame = function(callback) {
                 if (self.state.throttlingLevel > 0) {
-                    // EM VEZ DE IGNORAR, AGENDAMOS PARA EXECUTAR EM 1 SEGUNDO
-                    // Isso garante que o código de carregamento do YouTube eventualmente rode,
-                    // mesmo que a 1 FPS.
-                    return self.originals.setTimeout.call(this, () => {
-                        // Passamos o timestamp para o callback, como o rAF real faria
+                    const fallbackId = ++self.rafFallbackId;
+                    
+                    // Nível 1 (Música): 30 FPS (33ms) para não travar UI/Legendas
+                    // Nível 2 (Hibernação): 1 FPS (1000ms)
+                    const throttleDelay = self.state.throttlingLevel === 1 ? 33 : 1000;
+
+                    const timeoutId = self.originals.setTimeout.call(targetWindow, () => {
+                        self.rafFallbackTimers.delete(fallbackId);
                         callback(performance.now());
-                    }, 1000); 
+                    }, throttleDelay); 
+                    
+                    self.rafFallbackTimers.set(fallbackId, timeoutId);
+                    return fallbackId;
                 }
-                return self.originals.requestAnimationFrame.call(this, callback);
+                return self.originals.requestAnimationFrame.call(targetWindow, callback);
+            };
+
+            targetWindow.cancelAnimationFrame = function(id) {
+                if (self.rafFallbackTimers.has(id)) {
+                    const timeoutId = self.rafFallbackTimers.get(id);
+                    self.rafFallbackTimers.delete(id);
+                    return clearTimeout(timeoutId);
+                }
+                if (typeof self.originals.cancelAnimationFrame === 'function') {
+                    return self.originals.cancelAnimationFrame.call(targetWindow, id);
+                }
+                return clearTimeout(id);
             };
         }
     };
@@ -631,17 +967,48 @@
         config: null,
         observer: null,
         playerElement: null,
+        fullscreenHandler: null,
+        navigationHandler: null,
         
         init(config) {
             this.config = config;
-            this.playerElement = Utils.DOMCache.get('#movie_player') || 
-                                Utils.DOMCache.get('.html5-video-player');
+            this.resolvePlayerElement(true);
             this.createClock();
-            this.setupObserver();
             EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
-            document.addEventListener('fullscreenchange', () => this.handleFullscreen());
+            this.fullscreenHandler = () => this.handleFullscreen();
+            this.navigationHandler = () => {
+                this.resolvePlayerElement(true);
+                this.handleFullscreen();
+            };
+            document.addEventListener('fullscreenchange', this.fullscreenHandler);
+            document.addEventListener('yt-navigate-finish', this.navigationHandler);
             this.interval = setInterval(() => this.handleFullscreen(), 2000);
             log('Clock Manager inicializado');
+        },
+
+        resolvePlayerElement(force = false) {
+            const currentPlayer = this.playerElement;
+            if (!force && currentPlayer && currentPlayer.isConnected) {
+                return currentPlayer;
+            }
+
+            const resolvedPlayer = Utils.DOMCache.get('#movie_player', true) ||
+                                   Utils.DOMCache.get('.html5-video-player', true);
+
+            if (resolvedPlayer !== currentPlayer) {
+                if (this.observer) {
+                    this.observer.disconnect();
+                    this.observer = null;
+                }
+                this.playerElement = resolvedPlayer || null;
+                if (this.playerElement) {
+                    this.setupObserver();
+                }
+            } else if (!resolvedPlayer) {
+                this.playerElement = null;
+            }
+
+            return this.playerElement;
         },
         
         updateConfig(newConfig) {
@@ -668,6 +1035,7 @@
         
         setupObserver() {
             if (!this.playerElement) return;
+            if (this.observer) this.observer.disconnect();
             this.observer = new MutationObserver(
                 Utils.debounce(() => this.adjustPosition(), 150)
             );
@@ -675,7 +1043,11 @@
         },
         
         adjustPosition() {
-            if (!this.clockElement || !this.playerElement) return;
+            if (!this.clockElement) return;
+            if (!this.playerElement || !this.playerElement.isConnected) {
+                this.resolvePlayerElement(true);
+            }
+            if (!this.playerElement) return;
             try {
                 const isFullscreen = document.fullscreenElement != null;
                 const areControlsVisible = !this.playerElement.classList.contains('ytp-autohide');
@@ -711,6 +1083,11 @@
                 if (this.clockElement) this.clockElement.style.display = 'none';
                 return;
             }
+
+            if (!this.playerElement || !this.playerElement.isConnected) {
+                this.resolvePlayerElement(true);
+            }
+
             if (document.fullscreenElement) {
                 if (!this.clockElement) this.createClock();
                 this.clockElement.style.display = 'block';
@@ -727,6 +1104,12 @@
             if (this.observer) this.observer.disconnect();
             if (this.interval) clearInterval(this.interval);
             if (this.timeInterval) clearInterval(this.timeInterval);
+            if (this.fullscreenHandler) document.removeEventListener('fullscreenchange', this.fullscreenHandler);
+            if (this.navigationHandler) document.removeEventListener('yt-navigate-finish', this.navigationHandler);
+            this.observer = null;
+            this.playerElement = null;
+            this.fullscreenHandler = null;
+            this.navigationHandler = null;
         }
     };
 
@@ -735,17 +1118,22 @@
     // =======================================================
     function init() {
         try {
+            // CORREÇÃO: Limpeza preventiva de cache ao navegar (SPA)
+            Utils.safeAddEventListener(document, 'yt-navigate-start', () => {
+                Utils.DOMCache.refresh();
+            });
+
             // Configuração inicial para carregar os módulos
             const config = ConfigManager.load();
             if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init();
             
-            // CORREÇÃO (v1.1.5): Recarrega a config fresca ao abrir o menu
             GM_registerMenuCommand('⚙️ Configurações', () => {
-                const currentConfig = ConfigManager.load(); // <--- Leitura fresca aqui
+                const currentConfig = ConfigManager.load();
                 UIManager.createSettingsModal(currentConfig, (newConfig) => ConfigManager.save(newConfig));
             });
             
             StyleManager.init();
+            ShortsManager.init(config);
             ClockManager.init(config);
             StyleManager.apply(config);
             
@@ -754,11 +1142,12 @@
                 else if (!newConfig.FEATURES.CPU_TAMER && SmartCpuTamer.initialized) SmartCpuTamer.cleanup();
             });
             
-            log(`v${ConfigManager.CONFIG_VERSION} Carregado com Smart CPU Tamer v2.1`);
+            log(`v${ConfigManager.CONFIG_VERSION} Carregado com Smart CPU Tamer v2.2`);
             
             Utils.safeAddEventListener(window, 'beforeunload', () => {
                 SmartCpuTamer.cleanup();
                 ClockManager.cleanup();
+                ShortsManager.cleanup();
                 Utils.DOMCache.refresh();
             });
             
