@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      2.1.0
+// @version      2.1.1
 // @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts, elimina blur/translucidez e adiciona relógio customizável.
 // @author       John Wiliam & IA
 // @match        *://*.youtube.com/*
@@ -12,13 +12,18 @@
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @grant        unsafeWindow
+// @noframes
 // @run-at       document-start
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    const FLAG = "__yt_enhancer_v2_1_0__";
+    // Executa apenas no frame principal para evitar menu/GUI sendo aberto em iframes invisíveis.
+    if (window.top !== window.self) return;
+
+const SCRIPT_VERSION = '2.1.1';
+const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
     if (window[FLAG]) return;
     window[FLAG] = true;
 
