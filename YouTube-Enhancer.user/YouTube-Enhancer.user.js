@@ -370,220 +370,207 @@
     // =======================================================
     const UIManager = {
         cleanupFunctions: [],
-        
+        styleId: 'yt-enhancer-modal-style',
+
+        ensureStyles() {
+            if (document.getElementById(this.styleId)) return;
+            if (!document.head) {
+                requestAnimationFrame(() => this.ensureStyles());
+                return;
+            }
+
+            const style = document.createElement('style');
+            style.id = this.styleId;
+            style.textContent = `
+                .yt-enhancer-modal {
+                    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+                    width: min(420px, calc(100vw - 32px)); max-height: 80vh;
+                    background: #121212; color: #f1f1f1;
+                    border: 1px solid #333; border-radius: 12px;
+                    box-shadow: 0 12px 24px rgba(0,0,0,0.5);
+                    font-family: 'Roboto', Arial, sans-serif; font-size: 14px;
+                    display: flex; flex-direction: column; z-index: 10000;
+                }
+                input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+                input[type=number] { -moz-appearance: textfield; }
+                .modal-header { height: 50px; border-bottom: 1px solid #333; display: flex; align-items: center; justify-content: flex-end; padding: 0 15px; position: relative; }
+                .modal-title { position: absolute; left: 50%; transform: translateX(-50%); margin: 0; font-size: 16px; font-weight: 500; color: #fff; }
+                .close-btn { background: none; border: none; color: #aaa; font-size: 24px; cursor: pointer; padding: 0 5px; }
+                .close-btn:hover { color: #fff; }
+                .tabs-nav { display: flex; background: #1a1a1a; border-bottom: 1px solid #333; }
+                .tab-btn { flex: 1; padding: 12px; background: transparent; border: none; color: #888; cursor: pointer; font-weight: 500; border-bottom: 2px solid transparent; }
+                .tab-btn:hover { color: #ccc; background: #222; }
+                .tab-btn.active { color: #3ea6ff; border-bottom-color: #3ea6ff; background: #1a1a1a; }
+                .modal-content { padding: 20px; overflow-y: auto; flex: 1; }
+                .tab-pane { display: none; }
+                .tab-pane.active { display: block; animation: fadeEffect 0.2s; }
+                @keyframes fadeEffect { from {opacity: 0;} to {opacity: 1;} }
+                .options-list { display: flex; flex-direction: column; gap: 15px; }
+                .feature-toggle { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #1e1e1e; border-radius: 8px; cursor: pointer; }
+                .feature-toggle:hover { background: #252525; }
+                .feature-card-select, .feature-card-input { gap: 16px; }
+                .feature-card-select .styled-select { max-width: 140px; }
+                .toggle-text strong { display: block; font-size: 14px; margin-bottom: 2px; }
+                .toggle-text span { font-size: 12px; color: #aaa; }
+                .toggle-switch { position: relative; width: 40px; height: 22px; }
+                .toggle-switch input { opacity: 0; width: 0; height: 0; }
+                .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 22px; transition: .3s; }
+                .slider:before { position: absolute; content: ''; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; }
+                input:checked + .slider { background-color: #3ea6ff; }
+                input:checked + .slider:before { transform: translateX(18px); }
+                .appearance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+                .control-group { display: flex; flex-direction: column; gap: 8px; }
+                .styled-input, .styled-select { background: #1a1a1a; border: 1px solid #333; color: white; padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box; }
+                .styled-input-small { width: 60px; padding: 5px; background: #222; border: 1px solid #444; color: white; border-radius: 4px; text-align: center; }
+                .color-input-wrapper { display: flex; align-items: center; gap: 10px; background: #1a1a1a; padding: 5px; border: 1px solid #333; border-radius: 6px; }
+                input[type='color'] { border: none; width: 30px; height: 30px; padding: 0; background: none; cursor: pointer; }
+                .modal-footer { padding: 15px 20px; border-top: 1px solid #333; display: flex; align-items: center; gap: 12px; }
+                .reload-note { margin: 0; color: #f6cf6a; font-size: 12px; flex: 1; min-width: 0; }
+                .modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-left: auto; }
+                .btn { min-width: 156px; padding: 8px 20px; border: none; border-radius: 18px; cursor: pointer; font-weight: 500; display: inline-flex; justify-content: center; }
+                .btn-primary { background: #3ea6ff; color: #000; }
+                .btn-primary:hover { opacity: 0.9; }
+            `;
+            document.head.appendChild(style);
+        },
+
         createSettingsModal: function(currentConfig, onSave) {
+            this.ensureStyles();
             this.cleanupFunctions.forEach(fn => fn());
             this.cleanupFunctions = [];
-            
-            const oldModal = document.getElementById('yt-enhancer-settings-modal');
-            const oldOverlay = document.getElementById('yt-enhancer-overlay');
-            if (oldModal) oldModal.remove();
-            if (oldOverlay) oldOverlay.remove();
 
-            const overlay = document.createElement('div');
-            overlay.id = 'yt-enhancer-overlay';
-            overlay.style.cssText = `
-                position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-                background: rgba(0,0,0,0.6); z-index: 9998;
-            `;
+            document.getElementById('yt-enhancer-settings-modal')?.remove();
+            document.getElementById('yt-enhancer-overlay')?.remove();
 
-            const modalHTML = `
-                <div id="yt-enhancer-settings-modal" class="yt-enhancer-modal">
-                    <div class="modal-header">
-                        <h2 class="modal-title">${t('modal.title', currentConfig.LANGUAGE)}</h2>
-                        <button id="yt-enhancer-close" class="close-btn" title="${t('modal.closeTitle', currentConfig.LANGUAGE)}">×</button>
-                    </div>
+            const create = (tag, options = {}) => {
+                const el = document.createElement(tag);
+                if (options.id) el.id = options.id;
+                if (options.className) el.className = options.className;
+                if (options.text) el.textContent = options.text;
+                if (options.title) el.title = options.title;
+                if (options.type) el.type = options.type;
+                if (options.value !== undefined) el.value = options.value;
+                if (options.checked !== undefined) el.checked = !!options.checked;
+                if (options.min !== undefined) el.min = String(options.min);
+                if (options.max !== undefined) el.max = String(options.max);
+                if (options.step !== undefined) el.step = String(options.step);
+                if (options.forId) el.htmlFor = options.forId;
+                if (options.dataset) Object.assign(el.dataset, options.dataset);
+                if (options.style) Object.assign(el.style, options.style);
+                return el;
+            };
 
-                    <div class="tabs-nav">
-                        <button class="tab-btn active" data-target="tab-features">${t('modal.tabs.features', currentConfig.LANGUAGE)}</button>
-                        <button class="tab-btn" data-target="tab-appearance">${t('modal.tabs.appearance', currentConfig.LANGUAGE)}</button>
-                    </div>
+            const overlay = create('div', { id: 'yt-enhancer-overlay' });
+            overlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 9998;';
 
-                    <div class="modal-content">
-                        <div id="tab-features" class="tab-pane active">
-                            <div class="options-list">
-                                <label class="feature-toggle">
-                                    <div class="toggle-text">
-                                        <strong>${t('modal.features.cpuTamer.title', currentConfig.LANGUAGE)}</strong>
-                                        <span>${t('modal.features.cpuTamer.description', currentConfig.LANGUAGE)}</span>
-                                    </div>
-                                    <div class="toggle-switch">
-                                        <input type="checkbox" id="cfg-cpu-tamer" ${currentConfig.FEATURES.CPU_TAMER ? 'checked' : ''}>
-                                        <span class="slider"></span>
-                                    </div>
-                                </label>
+            const modal = create('div', { id: 'yt-enhancer-settings-modal', className: 'yt-enhancer-modal' });
+            const modalHeader = create('div', { className: 'modal-header' });
+            modalHeader.append(
+                create('h2', { className: 'modal-title', text: t('modal.title', currentConfig.LANGUAGE) }),
+                create('button', { id: 'yt-enhancer-close', className: 'close-btn', text: '×', title: t('modal.closeTitle', currentConfig.LANGUAGE) })
+            );
 
-                                <label class="feature-toggle">
-                                    <div class="toggle-text">
-                                        <strong>${t('modal.features.layout.title', currentConfig.LANGUAGE)}</strong>
-                                        <span>${t('modal.features.layout.description', currentConfig.LANGUAGE)}</span>
-                                    </div>
-                                    <div class="toggle-switch">
-                                        <input type="checkbox" id="cfg-layout" ${currentConfig.FEATURES.LAYOUT_ENHANCEMENT ? 'checked' : ''}>
-                                        <span class="slider"></span>
-                                    </div>
-                                </label>
+            const tabsNav = create('div', { className: 'tabs-nav' });
+            const tabFeaturesBtn = create('button', { className: 'tab-btn active', text: t('modal.tabs.features', currentConfig.LANGUAGE), dataset: { target: 'tab-features' } });
+            const tabAppearanceBtn = create('button', { className: 'tab-btn', text: t('modal.tabs.appearance', currentConfig.LANGUAGE), dataset: { target: 'tab-appearance' } });
+            tabsNav.append(tabFeaturesBtn, tabAppearanceBtn);
 
-                                <label id="layout-settings" class="feature-toggle feature-card-input" style="${!currentConfig.FEATURES.LAYOUT_ENHANCEMENT ? 'display:none' : ''}" for="cfg-videos-row">
-                                    <div class="toggle-text">
-                                        <strong>${t('modal.features.videosPerRow', currentConfig.LANGUAGE)}</strong>
-                                        <span>${t('modal.features.videosPerRowHint', currentConfig.LANGUAGE)}</span>
-                                    </div>
-                                    <input type="number" id="cfg-videos-row" min="3" max="8" value="${currentConfig.VIDEOS_PER_ROW}" class="styled-input-small">
-                                </label>
+            const modalContent = create('div', { className: 'modal-content' });
+            const tabFeatures = create('div', { id: 'tab-features', className: 'tab-pane active' });
+            const optionsList = create('div', { className: 'options-list' });
 
-                                <label class="feature-toggle">
-                                    <div class="toggle-text">
-                                        <strong>${t('modal.features.shorts.title', currentConfig.LANGUAGE)}</strong>
-                                        <span>${t('modal.features.shorts.description', currentConfig.LANGUAGE)}</span>
-                                    </div>
-                                    <div class="toggle-switch">
-                                        <input type="checkbox" id="cfg-shorts" ${currentConfig.FEATURES.SHORTS_REMOVAL ? 'checked' : ''}>
-                                        <span class="slider"></span>
-                                    </div>
-                                </label>
+            const createToggle = (id, title, description, checked) => {
+                const label = create('label', { className: 'feature-toggle' });
+                const textWrap = create('div', { className: 'toggle-text' });
+                textWrap.append(create('strong', { text: title }), create('span', { text: description }));
+                const switchWrap = create('div', { className: 'toggle-switch' });
+                const input = create('input', { id, type: 'checkbox', checked });
+                switchWrap.append(input, create('span', { className: 'slider' }));
+                label.append(textWrap, switchWrap);
+                return label;
+            };
 
-                                <label class="feature-toggle">
-                                    <div class="toggle-text">
-                                        <strong>${t('modal.features.clock.title', currentConfig.LANGUAGE)}</strong>
-                                        <span>${t('modal.features.clock.description', currentConfig.LANGUAGE)}</span>
-                                    </div>
-                                    <div class="toggle-switch">
-                                        <input type="checkbox" id="cfg-clock-enable" ${currentConfig.FEATURES.FULLSCREEN_CLOCK ? 'checked' : ''}>
-                                        <span class="slider"></span>
-                                    </div>
-                                </label>
+            optionsList.append(
+                createToggle('cfg-cpu-tamer', t('modal.features.cpuTamer.title', currentConfig.LANGUAGE), t('modal.features.cpuTamer.description', currentConfig.LANGUAGE), currentConfig.FEATURES.CPU_TAMER),
+                createToggle('cfg-layout', t('modal.features.layout.title', currentConfig.LANGUAGE), t('modal.features.layout.description', currentConfig.LANGUAGE), currentConfig.FEATURES.LAYOUT_ENHANCEMENT)
+            );
 
-                                <label class="feature-toggle">
-                                    <div class="toggle-text">
-                                        <strong>${t('modal.features.rtx.title', currentConfig.LANGUAGE)}</strong>
-                                        <span>${t('modal.features.rtx.description', currentConfig.LANGUAGE)}</span>
-                                    </div>
-                                    <div class="toggle-switch">
-                                        <input type="checkbox" id="cfg-rtx-visual" ${currentConfig.FEATURES.RTX_VISUAL_MODE ? 'checked' : ''}>
-                                        <span class="slider"></span>
-                                    </div>
-                                </label>
+            const layoutSettings = create('label', { id: 'layout-settings', className: 'feature-toggle feature-card-input', forId: 'cfg-videos-row' });
+            if (!currentConfig.FEATURES.LAYOUT_ENHANCEMENT) layoutSettings.style.display = 'none';
+            const layoutText = create('div', { className: 'toggle-text' });
+            layoutText.append(create('strong', { text: t('modal.features.videosPerRow', currentConfig.LANGUAGE) }), create('span', { text: t('modal.features.videosPerRowHint', currentConfig.LANGUAGE) }));
+            layoutSettings.append(layoutText, create('input', { id: 'cfg-videos-row', className: 'styled-input-small', type: 'number', min: 3, max: 8, value: currentConfig.VIDEOS_PER_ROW }));
+            optionsList.append(layoutSettings);
 
-                                <label class="feature-toggle feature-card-select" for="cfg-language">
-                                    <div class="toggle-text">
-                                        <strong>${t('modal.features.language.title', currentConfig.LANGUAGE)}</strong>
-                                        <span>${t('modal.features.language.description', currentConfig.LANGUAGE)}</span>
-                                    </div>
-                                    <select id="cfg-language" class="styled-select">
-                                        <option value="en" ${currentConfig.LANGUAGE === 'en' ? 'selected' : ''}>English</option>
-                                        <option value="pt" ${currentConfig.LANGUAGE === 'pt' ? 'selected' : ''}>Português</option>
-                                    </select>
-                                </label>
-                            </div>
-                        </div>
+            optionsList.append(
+                createToggle('cfg-shorts', t('modal.features.shorts.title', currentConfig.LANGUAGE), t('modal.features.shorts.description', currentConfig.LANGUAGE), currentConfig.FEATURES.SHORTS_REMOVAL),
+                createToggle('cfg-clock-enable', t('modal.features.clock.title', currentConfig.LANGUAGE), t('modal.features.clock.description', currentConfig.LANGUAGE), currentConfig.FEATURES.FULLSCREEN_CLOCK),
+                createToggle('cfg-rtx-visual', t('modal.features.rtx.title', currentConfig.LANGUAGE), t('modal.features.rtx.description', currentConfig.LANGUAGE), currentConfig.FEATURES.RTX_VISUAL_MODE)
+            );
 
-                        <div id="tab-appearance" class="tab-pane">
-                            <div class="appearance-grid">
-                                <div class="control-group">
-                                    <label>${t('modal.clockStyle.textColor', currentConfig.LANGUAGE)}</label>
-                                    <div class="color-input-wrapper">
-                                        <input type="color" id="style-color" value="${currentConfig.CLOCK_STYLE.color}">
-                                        <span class="color-value">${currentConfig.CLOCK_STYLE.color}</span>
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label>${t('modal.clockStyle.backgroundColor', currentConfig.LANGUAGE)}</label>
-                                    <div class="color-input-wrapper">
-                                        <input type="color" id="style-bg-color" value="${currentConfig.CLOCK_STYLE.bgColor}">
-                                        <span class="color-value">${currentConfig.CLOCK_STYLE.bgColor}</span>
-                                    </div>
-                                </div>
-                                <div class="control-group">
-                                    <label>${t('modal.clockStyle.backgroundOpacity', currentConfig.LANGUAGE)}</label>
-                                    <input type="number" id="style-bg-opacity" min="0" max="1" step="0.1" value="${currentConfig.CLOCK_STYLE.bgOpacity}" class="styled-input">
-                                </div>
-                                <div class="control-group">
-                                    <label>${t('modal.clockStyle.fontSize', currentConfig.LANGUAGE)}</label>
-                                    <input type="number" id="style-font-size" min="12" max="100" value="${currentConfig.CLOCK_STYLE.fontSize}" class="styled-input">
-                                </div>
-                                <div class="control-group">
-                                    <label>${t('modal.clockStyle.margin', currentConfig.LANGUAGE)}</label>
-                                    <input type="number" id="style-margin" min="0" max="200" value="${currentConfig.CLOCK_STYLE.margin}" class="styled-input">
-                                </div>
-                                <div class="control-group">
-                                    <label>${t('modal.clockStyle.borderRadius', currentConfig.LANGUAGE)}</label>
-                                    <input type="number" id="style-border-radius" min="0" max="50" value="${currentConfig.CLOCK_STYLE.borderRadius || 12}" class="styled-input">
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+            const languageCard = create('label', { className: 'feature-toggle feature-card-select', forId: 'cfg-language' });
+            const languageText = create('div', { className: 'toggle-text' });
+            languageText.append(create('strong', { text: t('modal.features.language.title', currentConfig.LANGUAGE) }), create('span', { text: t('modal.features.language.description', currentConfig.LANGUAGE) }));
+            const languageSelect = create('select', { id: 'cfg-language', className: 'styled-select' });
+            [
+                { value: 'en', label: 'English' },
+                { value: 'pt', label: 'Português' }
+            ].forEach(({ value, label }) => {
+                const option = create('option', { value, text: label });
+                if (currentConfig.LANGUAGE === value) option.selected = true;
+                languageSelect.appendChild(option);
+            });
+            languageCard.append(languageText, languageSelect);
+            optionsList.append(languageCard);
 
-                    <div class="modal-footer">
-                        <p id="yt-enhancer-reload-note" class="reload-note" style="display: none;">${t('modal.reloadNotice', currentConfig.LANGUAGE)}</p>
-                        <div class="modal-actions">
-                            <button id="yt-enhancer-apply" class="btn btn-primary">${t('modal.buttons.apply', currentConfig.LANGUAGE)}</button>
-                            <button id="yt-enhancer-reload" class="btn btn-primary" style="display: none;">${t('modal.buttons.applyAndReload', currentConfig.LANGUAGE)}</button>
-                        </div>
-                    </div>
-                </div>
+            tabFeatures.appendChild(optionsList);
 
-                <style>
-                    .yt-enhancer-modal {
-                        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-                        width: 420px; max-height: 80vh;
-                        background: #121212; color: #f1f1f1;
-                        border: 1px solid #333; border-radius: 12px;
-                        box-shadow: 0 12px 24px rgba(0,0,0,0.5);
-                        font-family: 'Roboto', Arial, sans-serif; font-size: 14px;
-                        display: flex; flex-direction: column; z-index: 10000;
-                    }
-                    input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-                    input[type=number] { -moz-appearance: textfield; }
-                    .modal-header { height: 50px; border-bottom: 1px solid #333; display: flex; align-items: center; justify-content: flex-end; padding: 0 15px; position: relative; }
-                    .modal-title { position: absolute; left: 50%; transform: translateX(-50%); margin: 0; font-size: 16px; font-weight: 500; color: #fff; }
-                    .close-btn { background: none; border: none; color: #aaa; font-size: 24px; cursor: pointer; padding: 0 5px; }
-                    .close-btn:hover { color: #fff; }
-                    .tabs-nav { display: flex; background: #1a1a1a; border-bottom: 1px solid #333; }
-                    .tab-btn { flex: 1; padding: 12px; background: transparent; border: none; color: #888; cursor: pointer; font-weight: 500; border-bottom: 2px solid transparent; }
-                    .tab-btn:hover { color: #ccc; background: #222; }
-                    .tab-btn.active { color: #3ea6ff; border-bottom-color: #3ea6ff; background: #1a1a1a; }
-                    .modal-content { padding: 20px; overflow-y: auto; flex: 1; }
-                    .tab-pane { display: none; }
-                    .tab-pane.active { display: block; animation: fadeEffect 0.2s; }
-                    @keyframes fadeEffect { from {opacity: 0;} to {opacity: 1;} }
-                    .options-list { display: flex; flex-direction: column; gap: 15px; }
-                    .feature-toggle { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #1e1e1e; border-radius: 8px; cursor: pointer; }
-                    .feature-toggle:hover { background: #252525; }
-                    .feature-card-select { gap: 16px; }
-                    .feature-card-select .styled-select { max-width: 140px; }
-                    .feature-card-input { gap: 16px; }
-                    .toggle-text strong { display: block; font-size: 14px; margin-bottom: 2px; }
-                    .toggle-text span { font-size: 12px; color: #aaa; }
-                    .toggle-switch { position: relative; width: 40px; height: 22px; }
-                    .toggle-switch input { opacity: 0; width: 0; height: 0; }
-                    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 22px; transition: .3s; }
-                    .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; }
-                    input:checked + .slider { background-color: #3ea6ff; }
-                    input:checked + .slider:before { transform: translateX(18px); }
-                    .appearance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-                    .control-group { display: flex; flex-direction: column; gap: 8px; }
-                    .styled-input, .styled-select { background: #1a1a1a; border: 1px solid #333; color: white; padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box; }
-                    .styled-input-small { width: 60px; padding: 5px; background: #222; border: 1px solid #444; color: white; border-radius: 4px; text-align: center; }
-                    .color-input-wrapper { display: flex; align-items: center; gap: 10px; background: #1a1a1a; padding: 5px; border: 1px solid #333; border-radius: 6px; }
-                    input[type="color"] { border: none; width: 30px; height: 30px; padding: 0; background: none; cursor: pointer; }
-                    .modal-footer { padding: 15px 20px; border-top: 1px solid #333; display: flex; align-items: center; gap: 12px; }
-                    .reload-note { margin: 0; color: #f6cf6a; font-size: 12px; flex: 1; min-width: 0; }
-                    .modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-left: auto; }
-                    .btn { min-width: 156px; padding: 8px 20px; border: none; border-radius: 18px; cursor: pointer; font-weight: 500; display: inline-flex; justify-content: center; }
-                    .btn-primary { background: #3ea6ff; color: #000; }
-                    .btn-primary:hover { opacity: 0.9; }
-                </style>
-            `;
+            const tabAppearance = create('div', { id: 'tab-appearance', className: 'tab-pane' });
+            const appearanceGrid = create('div', { className: 'appearance-grid' });
+            const createControl = (id, labelText, inputEl, valueEl = null) => {
+                const group = create('div', { className: 'control-group' });
+                group.append(create('label', { text: labelText }), inputEl);
+                if (valueEl) {
+                    const wrap = create('div', { className: 'color-input-wrapper' });
+                    wrap.append(inputEl, valueEl);
+                    group.replaceChild(wrap, inputEl);
+                }
+                inputEl.id = id;
+                return group;
+            };
 
-            document.body.appendChild(overlay);
-            document.body.insertAdjacentHTML('beforeend', modalHTML);
+            const colorInput = create('input', { type: 'color', value: currentConfig.CLOCK_STYLE.color });
+            const colorValue = create('span', { className: 'color-value', text: currentConfig.CLOCK_STYLE.color });
+            appearanceGrid.appendChild(createControl('style-color', t('modal.clockStyle.textColor', currentConfig.LANGUAGE), colorInput, colorValue));
+
+            const bgColorInput = create('input', { type: 'color', value: currentConfig.CLOCK_STYLE.bgColor });
+            const bgColorValue = create('span', { className: 'color-value', text: currentConfig.CLOCK_STYLE.bgColor });
+            appearanceGrid.appendChild(createControl('style-bg-color', t('modal.clockStyle.backgroundColor', currentConfig.LANGUAGE), bgColorInput, bgColorValue));
+
+            appearanceGrid.appendChild(createControl('style-bg-opacity', t('modal.clockStyle.backgroundOpacity', currentConfig.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 0, max: 1, step: 0.1, value: currentConfig.CLOCK_STYLE.bgOpacity })));
+            appearanceGrid.appendChild(createControl('style-font-size', t('modal.clockStyle.fontSize', currentConfig.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 12, max: 100, value: currentConfig.CLOCK_STYLE.fontSize })));
+            appearanceGrid.appendChild(createControl('style-margin', t('modal.clockStyle.margin', currentConfig.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 0, max: 200, value: currentConfig.CLOCK_STYLE.margin })));
+            appearanceGrid.appendChild(createControl('style-border-radius', t('modal.clockStyle.borderRadius', currentConfig.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 0, max: 50, value: currentConfig.CLOCK_STYLE.borderRadius || 12 })));
+
+            tabAppearance.appendChild(appearanceGrid);
+            modalContent.append(tabFeatures, tabAppearance);
+
+            const modalFooter = create('div', { className: 'modal-footer' });
+            const reloadNotice = create('p', { id: 'yt-enhancer-reload-note', className: 'reload-note', text: t('modal.reloadNotice', currentConfig.LANGUAGE) });
+            reloadNotice.style.display = 'none';
+            const modalActions = create('div', { className: 'modal-actions' });
+            const btnApply = create('button', { id: 'yt-enhancer-apply', className: 'btn btn-primary', text: t('modal.buttons.apply', currentConfig.LANGUAGE) });
+            const btnReload = create('button', { id: 'yt-enhancer-reload', className: 'btn btn-primary', text: t('modal.buttons.applyAndReload', currentConfig.LANGUAGE) });
+            btnReload.style.display = 'none';
+            modalActions.append(btnApply, btnReload);
+            modalFooter.append(reloadNotice, modalActions);
+
+            modal.append(modalHeader, tabsNav, modalContent, modalFooter);
+            document.body.append(overlay, modal);
 
             const closeModal = () => {
-                const modal = document.getElementById('yt-enhancer-settings-modal');
-                const overlay = document.getElementById('yt-enhancer-overlay');
-                if (modal) modal.remove();
-                if (overlay) overlay.remove();
+                modal.remove();
+                overlay.remove();
                 this.cleanupFunctions.forEach(fn => fn());
                 this.cleanupFunctions = [];
             };
@@ -591,77 +578,64 @@
             this.cleanupFunctions.push(Utils.safeAddEventListener(overlay, 'click', closeModal));
             this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('yt-enhancer-close'), 'click', closeModal));
 
-            document.querySelectorAll('.tab-btn').forEach(btn => {
+            [tabFeaturesBtn, tabAppearanceBtn].forEach((btn) => {
                 this.cleanupFunctions.push(Utils.safeAddEventListener(btn, 'click', () => {
-                    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+                    [tabFeaturesBtn, tabAppearanceBtn].forEach((b) => b.classList.remove('active'));
+                    [tabFeatures, tabAppearance].forEach((pane) => pane.classList.remove('active'));
                     btn.classList.add('active');
-                    document.getElementById(btn.dataset.target).classList.add('active');
+                    (btn.dataset.target === 'tab-features' ? tabFeatures : tabAppearance).classList.add('active');
                 }));
             });
 
             const layoutToggle = document.getElementById('cfg-layout');
             this.cleanupFunctions.push(Utils.safeAddEventListener(layoutToggle, 'change', (e) => {
-                document.getElementById('layout-settings').style.display = e.target.checked ? 'flex' : 'none';
+                layoutSettings.style.display = e.target.checked ? 'flex' : 'none';
             }));
 
             ['style-color', 'style-bg-color'].forEach(id => {
                 this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById(id), 'input', (e) => {
-                    e.target.nextElementSibling.textContent = e.target.value;
+                    if (e.target.nextElementSibling) e.target.nextElementSibling.textContent = e.target.value;
                 }));
             });
 
-            const getNewConfig = () => {
-                return Utils.sanitizeConfig({
-                    LANGUAGE: document.getElementById('cfg-language').value,
-                    VIDEOS_PER_ROW: parseInt(document.getElementById('cfg-videos-row').value) || 5,
-                    FEATURES: {
-                        CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
-                        LAYOUT_ENHANCEMENT: document.getElementById('cfg-layout').checked,
-                        SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked,
-                        FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked,
-                        RTX_VISUAL_MODE: document.getElementById('cfg-rtx-visual').checked
-                    },
-                    CLOCK_STYLE: {
-                        color: document.getElementById('style-color').value,
-                        bgColor: document.getElementById('style-bg-color').value,
-                        bgOpacity: parseFloat(document.getElementById('style-bg-opacity').value),
-                        fontSize: parseInt(document.getElementById('style-font-size').value),
-                        margin: parseInt(document.getElementById('style-margin').value),
-                        borderRadius: parseInt(document.getElementById('style-border-radius').value),
-                        position: 'bottom-right'
-                    }
-                }, ConfigManager.defaults);
-            };
+            const getNewConfig = () => Utils.sanitizeConfig({
+                LANGUAGE: document.getElementById('cfg-language').value,
+                VIDEOS_PER_ROW: parseInt(document.getElementById('cfg-videos-row').value, 10) || 5,
+                FEATURES: {
+                    CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
+                    LAYOUT_ENHANCEMENT: document.getElementById('cfg-layout').checked,
+                    SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked,
+                    FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked,
+                    RTX_VISUAL_MODE: document.getElementById('cfg-rtx-visual').checked
+                },
+                CLOCK_STYLE: {
+                    color: document.getElementById('style-color').value,
+                    bgColor: document.getElementById('style-bg-color').value,
+                    bgOpacity: parseFloat(document.getElementById('style-bg-opacity').value),
+                    fontSize: parseInt(document.getElementById('style-font-size').value, 10),
+                    margin: parseInt(document.getElementById('style-margin').value, 10),
+                    borderRadius: parseInt(document.getElementById('style-border-radius').value, 10),
+                    position: 'bottom-right'
+                }
+            }, ConfigManager.defaults);
 
-            const btnApply = document.getElementById('yt-enhancer-apply');
-            const btnReload = document.getElementById('yt-enhancer-reload');
-            const reloadNotice = document.getElementById('yt-enhancer-reload-note');
-            const cpuToggle = document.getElementById('cfg-cpu-tamer');
-            const languageSelect = document.getElementById('cfg-language');
             const initialCpuState = currentConfig.FEATURES.CPU_TAMER;
             const initialLanguageState = currentConfig.LANGUAGE;
 
             const updateSaveButtons = () => {
                 const newConfig = getNewConfig();
-                const requiresReload = (
-                    newConfig.FEATURES.CPU_TAMER !== initialCpuState ||
-                    newConfig.LANGUAGE !== initialLanguageState
-                );
-
+                const requiresReload = newConfig.FEATURES.CPU_TAMER !== initialCpuState || newConfig.LANGUAGE !== initialLanguageState;
                 btnApply.style.display = requiresReload ? 'none' : 'block';
                 btnReload.style.display = requiresReload ? 'block' : 'none';
                 reloadNotice.style.display = requiresReload ? 'block' : 'none';
             };
 
-            this.cleanupFunctions.push(Utils.safeAddEventListener(cpuToggle, 'change', updateSaveButtons));
-            this.cleanupFunctions.push(Utils.safeAddEventListener(languageSelect, 'change', updateSaveButtons));
-
+            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-cpu-tamer'), 'change', updateSaveButtons));
+            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-language'), 'change', updateSaveButtons));
             this.cleanupFunctions.push(Utils.safeAddEventListener(btnApply, 'click', () => {
                 onSave(getNewConfig());
                 closeModal();
             }));
-
             this.cleanupFunctions.push(Utils.safeAddEventListener(btnReload, 'click', () => {
                 onSave(getNewConfig());
                 closeModal();
@@ -837,6 +811,7 @@
             if (this.listenersCleanup.length === 0) {
                 this.listenersCleanup.push(
                     Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()),
+                    Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()),
                     Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune())
                 );
             }
@@ -1285,6 +1260,10 @@
         try {
             // CORREÇÃO: Limpeza preventiva de cache ao navegar (SPA)
             Utils.safeAddEventListener(document, 'yt-navigate-start', () => {
+                Utils.DOMCache.refresh();
+            });
+
+            Utils.safeAddEventListener(document, 'yt-page-data-updated', () => {
                 Utils.DOMCache.refresh();
             });
 
