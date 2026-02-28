@@ -22,7 +22,8 @@
     // Executa apenas no frame principal para evitar menu/GUI sendo aberto em iframes invisíveis.
     if (window.top !== window.self) return;
 
-    const FLAG = "__yt_enhancer_v2_1_1__";
+const SCRIPT_VERSION = '2.1.1';
+const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
     if (window[FLAG]) return;
     window[FLAG] = true;
 
