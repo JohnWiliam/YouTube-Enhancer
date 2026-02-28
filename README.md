@@ -1,9 +1,8 @@
 # 🚀 YouTube Enhancer
 
-> **Optimize, Customize, and Take control of your YouTube experience.**  
-> **Otimize, personalize e domine sua experiência no YouTube.**
+> **Optimize, Customize, and Take control of your YouTube experience.** > **Otimize, personalize e domine sua experiência no YouTube.**
 
-![Version](https://img.shields.io/badge/Version-2.0.0-blue)
+![Version](https://img.shields.io/badge/Version-2.1.0-blue)
 ![Language](https://img.shields.io/badge/Language-JavaScript-F7DF1E?logo=javascript&logoColor=F7DF1E)
 ![Author](https://img.shields.io/badge/Author-John%20Wiliam%20%26%20IA-orange)
 [![Install](https://img.shields.io/badge/Install-Click_Here-green)](https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js)
@@ -20,9 +19,9 @@ YouTube Enhancer is a powerful userscript for **Violentmonkey** that improves Yo
 
 ### ✨ Main Features
 
-1. **⚡ Smart CPU Tamer**
-   - Reduces script activity when the tab is hidden.
-   - Helps lower CPU usage, heat, and battery drain.
+1. **⚡ Smart CPU Tamer (v2.2)**
+   - Reduces script activity when the tab is hidden to lower CPU usage, heat, and battery drain.
+   - *New in 2.1.0:* Includes a 30-second Grace Period and intelligent Soft Throttling, ensuring background media playback and subtitles remain smooth without UI freezes.
 
 2. **🎨 Grid Layout Control**
    - Choose how many videos appear per row (**3 to 8**).
@@ -59,6 +58,7 @@ No code editing required:
 - JavaScript (ES6+)
 - GM API (`GM_getValue`, `GM_setValue`, `GM_registerMenuCommand`)
 - Dynamic CSS injection
+- Advanced DOM Caching & SPA Memory Leak Prevention
 
 ### 📝 Credits
 
@@ -72,9 +72,9 @@ O YouTube Enhancer é um userscript poderoso para **Violentmonkey** que melhora 
 
 ### ✨ Funcionalidades Principais
 
-1. **⚡ Smart CPU Tamer**
-   - Reduz a atividade de scripts quando a aba está oculta.
-   - Ajuda a diminuir uso de CPU, aquecimento e consumo de bateria.
+1. **⚡ Smart CPU Tamer (v2.2)**
+   - Reduz a atividade de scripts quando a aba está oculta, ajudando a diminuir uso de CPU, aquecimento e consumo de bateria.
+   - *Novo na 2.1.0:* Inclui um Período de Graça de 30 segundos e ajuste suave de quadros (Soft Throttling). Mantém a reprodução em segundo plano e legendas fluidas, sem travar a interface.
 
 2. **🎨 Controle de Layout Grid**
    - Permite escolher quantos vídeos aparecem por linha (**3 a 8**).
@@ -111,6 +111,7 @@ Sem editar código:
 - JavaScript (ES6+)
 - GM API (`GM_getValue`, `GM_setValue`, `GM_registerMenuCommand`)
 - Injeção dinâmica de CSS
+- Cache de DOM Avançado e Prevenção de Memory Leak em SPA
 
 ### 📝 Créditos
 
