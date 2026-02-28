@@ -374,6 +374,29 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
         cleanupFunctions: [],
         styleId: 'yt-enhancer-modal-style',
 
+        ensureBodyReady(maxAttempts = 60, interval = 50) {
+            return new Promise((resolve) => {
+                let attempts = 0;
+
+                const check = () => {
+                    if (document.body) {
+                        resolve(true);
+                        return;
+                    }
+
+                    attempts += 1;
+                    if (attempts >= maxAttempts) {
+                        resolve(false);
+                        return;
+                    }
+
+                    setTimeout(check, interval);
+                };
+
+                check();
+            });
+        },
+
         ensureStyles() {
             if (document.getElementById(this.styleId)) return;
             if (!document.head) {
@@ -436,7 +459,13 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
             document.head.appendChild(style);
         },
 
-        createSettingsModal: function(currentConfig, onSave) {
+        createSettingsModal: async function(currentConfig, onSave) {
+            const bodyReady = await this.ensureBodyReady();
+            if (!bodyReady) {
+                console.error('[YT Enhancer] Não foi possível abrir Configurações: document.body indisponível.');
+                return false;
+            }
+
             this.ensureStyles();
             this.cleanupFunctions.forEach(fn => fn());
             this.cleanupFunctions = [];
@@ -643,6 +672,8 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
                 closeModal();
                 setTimeout(() => window.location.reload(), 100);
             }));
+
+            return true;
         }
     };
 
@@ -1275,9 +1306,14 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
             
             const isTopFrame = window.top === window.self;
             if (isTopFrame) {
-                GM_registerMenuCommand(t('menu.openSettings', config.LANGUAGE), () => {
+                GM_registerMenuCommand(t('menu.openSettings', config.LANGUAGE), async () => {
                     const currentConfig = ConfigManager.load();
-                    UIManager.createSettingsModal(currentConfig, (newConfig) => ConfigManager.save(newConfig));
+                    const opened = await UIManager.createSettingsModal(currentConfig, (newConfig) => ConfigManager.save(newConfig));
+                    if (!opened) {
+                        setTimeout(() => {
+                            UIManager.createSettingsModal(currentConfig, (newConfig) => ConfigManager.save(newConfig));
+                        }, 200);
+                    }
                 });
             }
             
