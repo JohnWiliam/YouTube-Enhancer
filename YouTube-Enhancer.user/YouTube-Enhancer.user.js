@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      2.1.2
+// @version      2.1.3
 // @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts, elimina blur/translucidez e adiciona relógio customizável.
 // @author       John Wiliam & IA
 // @match        *://www.youtube.com/*
@@ -12,6 +12,7 @@
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_addStyle
+// @grant        GM_addElement
 // @grant        unsafeWindow
 // @run-at       document-start
 // ==/UserScript==
@@ -19,14 +20,12 @@
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = '2.1.2';
+    const SCRIPT_VERSION = '2.1.3';
     const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
     if (window[FLAG]) return;
     window[FLAG] = true;
 
-    // Referência segura para o objeto Window da página
     const targetWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-
     const log = (msg) => console.log(`[YT Enhancer] ${msg}`);
 
     // =======================================================
@@ -34,32 +33,22 @@
     // =======================================================
     const EventBus = {
         events: new Map(),
-        
         on(event, callback) {
-            if (!this.events.has(event)) {
-                this.events.set(event, []);
-            }
+            if (!this.events.has(event)) this.events.set(event, []);
             this.events.get(event).push(callback);
             return () => this.off(event, callback);
         },
-        
         off(event, callback) {
             if (!this.events.has(event)) return;
             const callbacks = this.events.get(event);
             const index = callbacks.indexOf(callback);
             if (index > -1) callbacks.splice(index, 1);
         },
-        
         emit(event, data) {
             if (!this.events.has(event)) return;
-            const callbacks = [...this.events.get(event)];
-            for (const callback of callbacks) {
-                try {
-                    callback(data);
-                } catch (error) {
-                    console.error(`EventBus error in ${event}:`, error);
-                }
-            }
+            [...this.events.get(event)].forEach(callback => {
+                try { callback(data); } catch (e) { console.error(`EventBus error [${event}]:`, e); }
+            });
         }
     };
 
@@ -68,115 +57,78 @@
     // =======================================================
     const Utils = {
         clamp(value, min, max, fallback = min) {
-            const numeric = Number(value);
-            if (!Number.isFinite(numeric)) return fallback;
-            return Math.min(max, Math.max(min, numeric));
+            const num = Number(value);
+            return Number.isFinite(num) ? Math.min(max, Math.max(min, num)) : fallback;
         },
-
-        isHexColor(value) {
-            return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value);
-        },
-
+        isHexColor(value) { return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value); },
         sanitizeConfig(config, defaults) {
-            const safeConfig = {
-                ...defaults,
-                ...(config || {}),
-                FEATURES: { ...defaults.FEATURES, ...(config?.FEATURES || {}) },
-                CLOCK_STYLE: { ...defaults.CLOCK_STYLE, ...(config?.CLOCK_STYLE || {}) }
-            };
-
-            safeConfig.LANGUAGE = ['pt', 'en'].includes(safeConfig.LANGUAGE) ? safeConfig.LANGUAGE : defaults.LANGUAGE;
-
-            safeConfig.VIDEOS_PER_ROW = this.clamp(safeConfig.VIDEOS_PER_ROW, 3, 8, defaults.VIDEOS_PER_ROW);
-            safeConfig.CLOCK_STYLE.bgOpacity = this.clamp(safeConfig.CLOCK_STYLE.bgOpacity, 0, 1, defaults.CLOCK_STYLE.bgOpacity);
-            safeConfig.CLOCK_STYLE.fontSize = this.clamp(safeConfig.CLOCK_STYLE.fontSize, 12, 48, defaults.CLOCK_STYLE.fontSize);
-            safeConfig.CLOCK_STYLE.margin = this.clamp(safeConfig.CLOCK_STYLE.margin, 0, 120, defaults.CLOCK_STYLE.margin);
-            safeConfig.CLOCK_STYLE.borderRadius = this.clamp(safeConfig.CLOCK_STYLE.borderRadius, 0, 50, defaults.CLOCK_STYLE.borderRadius);
-            safeConfig.CLOCK_STYLE.color = this.isHexColor(safeConfig.CLOCK_STYLE.color) ? safeConfig.CLOCK_STYLE.color : defaults.CLOCK_STYLE.color;
-            safeConfig.CLOCK_STYLE.bgColor = this.isHexColor(safeConfig.CLOCK_STYLE.bgColor) ? safeConfig.CLOCK_STYLE.bgColor : defaults.CLOCK_STYLE.bgColor;
-
-            return safeConfig;
+            const safe = { ...defaults, ...(config || {}), FEATURES: { ...defaults.FEATURES, ...(config?.FEATURES || {}) }, CLOCK_STYLE: { ...defaults.CLOCK_STYLE, ...(config?.CLOCK_STYLE || {}) } };
+            safe.LANGUAGE = ['pt', 'en'].includes(safe.LANGUAGE) ? safe.LANGUAGE : defaults.LANGUAGE;
+            safe.VIDEOS_PER_ROW = this.clamp(safe.VIDEOS_PER_ROW, 3, 8, defaults.VIDEOS_PER_ROW);
+            safe.CLOCK_STYLE.bgOpacity = this.clamp(safe.CLOCK_STYLE.bgOpacity, 0, 1, defaults.CLOCK_STYLE.bgOpacity);
+            safe.CLOCK_STYLE.fontSize = this.clamp(safe.CLOCK_STYLE.fontSize, 12, 48, defaults.CLOCK_STYLE.fontSize);
+            safe.CLOCK_STYLE.margin = this.clamp(safe.CLOCK_STYLE.margin, 0, 120, defaults.CLOCK_STYLE.margin);
+            safe.CLOCK_STYLE.borderRadius = this.clamp(safe.CLOCK_STYLE.borderRadius, 0, 50, defaults.CLOCK_STYLE.borderRadius);
+            safe.CLOCK_STYLE.color = this.isHexColor(safe.CLOCK_STYLE.color) ? safe.CLOCK_STYLE.color : defaults.CLOCK_STYLE.color;
+            safe.CLOCK_STYLE.bgColor = this.isHexColor(safe.CLOCK_STYLE.bgColor) ? safe.CLOCK_STYLE.bgColor : defaults.CLOCK_STYLE.bgColor;
+            return safe;
         },
-
-        debounce(func, wait, immediate = false) {
+        debounce(func, wait) {
             let timeout;
             return function(...args) {
-                const context = this;
-                const later = () => {
-                    timeout = null;
-                    if (!immediate) func.apply(context, args);
-                };
-                const callNow = immediate && !timeout;
                 clearTimeout(timeout);
-                timeout = setTimeout(later, wait);
-                if (callNow) func.apply(context, args);
+                timeout = setTimeout(() => func.apply(this, args), wait);
             };
         },
-
         DOMCache: {
             cache: new Map(),
-            observers: new Map(),
-            
-            get(selector, forceUpdate = false) {
-                if (!forceUpdate && this.cache.has(selector)) {
-                    const cachedEl = this.cache.get(selector);
-                    if (cachedEl && cachedEl.isConnected) {
-                        return cachedEl;
-                    }
+            get(selector, force = false) {
+                if (!force && this.cache.has(selector)) {
+                    const el = this.cache.get(selector);
+                    if (el && el.isConnected) return el;
                     this.cache.delete(selector);
                 }
-
-                const element = document.querySelector(selector);
-                if (element) {
-                    this.cache.set(selector, element);
-                }
-                return element;
+                const el = document.querySelector(selector);
+                if (el) this.cache.set(selector, el);
+                return el;
             },
-            
-            refresh(selector = null) {
-                if (selector) {
-                    this.cache.delete(selector);
-                } else {
-                    this.cache.clear();
-                }
-            },
-            
-            disconnect(selector) {
-                if (this.observers.has(selector)) {
-                    this.observers.get(selector).disconnect();
-                    this.observers.delete(selector);
-                }
-            }
+            refresh() { this.cache.clear(); }
         },
-
         safeAddEventListener(element, event, handler, options = {}) {
             if (!element) return () => {};
-            
-            const safeHandler = (e) => {
-                try {
-                    return handler(e);
-                } catch (error) {
-                    console.error(`Error in ${event} handler:`, error);
-                    return null;
-                }
-            };
-            
+            const safeHandler = (e) => { try { return handler(e); } catch (err) { console.error(`[Event] ${event}:`, err); } };
             element.addEventListener(event, safeHandler, options);
             return () => element.removeEventListener(event, safeHandler, options);
         },
-
-        migrateConfig(savedConfig, currentVersion = '2.1.2') {
-            if (!savedConfig || typeof savedConfig !== 'object') {
-                return null;
-            }
+        migrateConfig(savedConfig, currentVersion) {
+            if (!savedConfig || typeof savedConfig !== 'object') return null;
             if (!savedConfig.version) {
                 savedConfig.version = '1.0.0';
-                if (!savedConfig.CLOCK_STYLE?.borderRadius) {
-                    savedConfig.CLOCK_STYLE = { ...savedConfig.CLOCK_STYLE, borderRadius: 12 };
-                }
+                if (!savedConfig.CLOCK_STYLE?.borderRadius) savedConfig.CLOCK_STYLE = { ...savedConfig.CLOCK_STYLE, borderRadius: 12 };
             }
             savedConfig.version = currentVersion;
             return savedConfig;
+        },
+        // Injetor universal de CSS para bypass de CSP
+        injectCSS(css, id) {
+            try {
+                const old = document.getElementById(id);
+                if (old) old.remove();
+
+                if (typeof GM_addStyle === 'function') {
+                    const styleEl = GM_addStyle(css);
+                    if (styleEl) styleEl.id = id;
+                } else if (typeof GM_addElement === 'function') {
+                    GM_addElement('style', { id: id, textContent: css });
+                } else {
+                    const styleEl = document.createElement('style');
+                    styleEl.id = id;
+                    styleEl.textContent = css;
+                    (document.head || document.documentElement).appendChild(styleEl);
+                }
+            } catch (error) {
+                console.error(`[YT Enhancer] Falha ao injetar CSS (${id}):`, error);
+            }
         }
     };
 
@@ -185,51 +137,11 @@
     // =======================================================
     const I18N = {
         pt: {
-            modal: {
-                title: '⚙️ Configurações',
-                closeTitle: 'Fechar',
-                tabs: { features: '🔧 Funcionalidades', appearance: '🎨 Aparência do relógio' },
-                features: {
-                    cpuTamer: { title: 'Redução Inteligente de CPU', description: 'Otimiza quando oculto (economiza bateria)' },
-                    layout: { title: 'Layout Grid', description: 'Ajusta vídeos por linha' },
-                    videosPerRow: 'Vídeos por linha',
-                    videosPerRowHint: 'Define quantos vídeos aparecem em cada linha',
-                    shorts: { title: 'Remover Shorts', description: 'Limpa Shorts da interface' },
-                    clock: { title: 'Relógio Flutuante', description: 'Mostra hora sobre o vídeo' },
-                    rtx: { title: 'Modo RTX (sem blur/translucidez)', description: 'Remove blur e transforma fundos translúcidos em transparentes' },
-                    language: { title: 'Idioma da Interface', description: 'Troca os textos entre português e inglês' }
-                },
-                clockStyle: {
-                    textColor: 'Cor do Texto', backgroundColor: 'Cor do Fundo', backgroundOpacity: 'Opacidade Fundo',
-                    fontSize: 'Tamanho Fonte (px)', margin: 'Margem (px)', borderRadius: 'Arredondamento (px)'
-                },
-                buttons: { apply: 'Aplicar', applyAndReload: 'Aplicar e Recarregar' },
-                reloadNotice: 'Mudanças de idioma e CPU exigem recarregar a página para aplicar.'
-            },
+            modal: { title: '⚙️ Configurações', closeTitle: 'Fechar', tabs: { features: '🔧 Funcionalidades', appearance: '🎨 Aparência do relógio' }, features: { cpuTamer: { title: 'Redução Inteligente de CPU', description: 'Otimiza quando oculto (economiza bateria)' }, layout: { title: 'Layout Grid', description: 'Ajusta vídeos por linha' }, videosPerRow: 'Vídeos por linha', videosPerRowHint: 'Define quantos vídeos aparecem', shorts: { title: 'Remover Shorts', description: 'Limpa Shorts da interface' }, clock: { title: 'Relógio Flutuante', description: 'Mostra hora sobre o vídeo' }, rtx: { title: 'Modo RTX (sem blur)', description: 'Fundos translúcidos ficam transparentes' }, language: { title: 'Idioma da Interface', description: 'Troca textos entre PT e EN' } }, clockStyle: { textColor: 'Cor do Texto', backgroundColor: 'Cor do Fundo', backgroundOpacity: 'Opacidade Fundo', fontSize: 'Tamanho Fonte (px)', margin: 'Margem (px)', borderRadius: 'Arredondamento (px)' }, buttons: { apply: 'Aplicar', applyAndReload: 'Aplicar e Recarregar' }, reloadNotice: 'Idioma e CPU exigem recarregar a página.' },
             menu: { openSettings: '⚙️ Configurações' }
         },
         en: {
-            modal: {
-                title: '⚙️ Settings',
-                closeTitle: 'Close',
-                tabs: { features: '🔧 Features', appearance: '🎨 Clock appearance' },
-                features: {
-                    cpuTamer: { title: 'Smart CPU Reduction', description: 'Optimizes when hidden (saves battery)' },
-                    layout: { title: 'Grid Layout', description: 'Adjusts videos per row' },
-                    videosPerRow: 'Videos per row',
-                    videosPerRowHint: 'Defines how many videos appear in each row',
-                    shorts: { title: 'Remove Shorts', description: 'Cleans Shorts from the interface' },
-                    clock: { title: 'Floating Clock', description: 'Shows time over the video' },
-                    rtx: { title: 'RTX Mode (no blur/translucency)', description: 'Removes blur and turns translucent backgrounds transparent' },
-                    language: { title: 'Interface Language', description: 'Switch all texts between English and Portuguese' }
-                },
-                clockStyle: {
-                    textColor: 'Text Color', backgroundColor: 'Background Color', backgroundOpacity: 'Background Opacity',
-                    fontSize: 'Font Size (px)', margin: 'Margin (px)', borderRadius: 'Roundness (px)'
-                },
-                buttons: { apply: 'Apply', applyAndReload: 'Apply and Reload' },
-                reloadNotice: 'Language and CPU changes require reloading the page to apply.'
-            },
+            modal: { title: '⚙️ Settings', closeTitle: 'Close', tabs: { features: '🔧 Features', appearance: '🎨 Clock appearance' }, features: { cpuTamer: { title: 'Smart CPU Reduction', description: 'Optimizes when hidden (saves battery)' }, layout: { title: 'Grid Layout', description: 'Adjusts videos per row' }, videosPerRow: 'Videos per row', videosPerRowHint: 'Defines videos in each row', shorts: { title: 'Remove Shorts', description: 'Cleans Shorts from UI' }, clock: { title: 'Floating Clock', description: 'Shows time over the video' }, rtx: { title: 'RTX Mode (no blur)', description: 'Turns translucent backgrounds transparent' }, language: { title: 'Interface Language', description: 'Switch texts between EN and PT' } }, clockStyle: { textColor: 'Text Color', backgroundColor: 'Background Color', backgroundOpacity: 'Background Opacity', fontSize: 'Font Size (px)', margin: 'Margin (px)', borderRadius: 'Roundness (px)' }, buttons: { apply: 'Apply', applyAndReload: 'Apply and Reload' }, reloadNotice: 'Language and CPU require reloading.' },
             menu: { openSettings: '⚙️ Settings' }
         }
     };
@@ -242,45 +154,32 @@
     };
 
     const ConfigManager = {
-        CONFIG_VERSION: '2.1.2',
+        CONFIG_VERSION: '2.1.3',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
-        
         defaults: {
-            version: '2.1.2',
-            LANGUAGE: 'pt',
-            VIDEOS_PER_ROW: 5,
+            version: '2.1.3', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
             FEATURES: { CPU_TAMER: true, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true, RTX_VISUAL_MODE: true },
             CLOCK_STYLE: { color: '#ffffff', bgColor: '#191919', bgOpacity: 0.2, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
-
-        load: function() {
+        load() {
             try {
                 const saved = GM_getValue(this.STORAGE_KEY);
-                const migratedConfig = Utils.migrateConfig(saved, this.CONFIG_VERSION);
-                if (!migratedConfig) return Utils.sanitizeConfig({}, this.defaults);
-                return Utils.sanitizeConfig(migratedConfig, this.defaults);
-            } catch (error) {
-                log('Erro ao carregar configuração: ' + error);
-                return Utils.sanitizeConfig({}, this.defaults);
-            }
+                return Utils.sanitizeConfig(Utils.migrateConfig(saved, this.CONFIG_VERSION) || {}, this.defaults);
+            } catch (e) { return Utils.sanitizeConfig({}, this.defaults); }
         },
-
-        save: function(config) {
+        save(config) {
             try {
-                const sanitizedConfig = Utils.sanitizeConfig(config, this.defaults);
-                sanitizedConfig.version = this.CONFIG_VERSION;
-                GM_setValue(this.STORAGE_KEY, sanitizedConfig);
-                EventBus.emit('configChanged', sanitizedConfig);
+                const sanitized = Utils.sanitizeConfig(config, this.defaults);
+                sanitized.version = this.CONFIG_VERSION;
+                GM_setValue(this.STORAGE_KEY, sanitized);
+                EventBus.emit('configChanged', sanitized);
                 return true;
-            } catch (error) {
-                log('Erro ao salvar configuração: ' + error);
-                return false;
-            }
+            } catch (e) { return false; }
         }
     };
 
     // =======================================================
-    // 2. UI MANAGER (Corrigido para usar GM_addStyle contra CSP)
+    // 2. UI MANAGER (Modal Blindado)
     // =======================================================
     const UIManager = {
         cleanupFunctions: [],
@@ -290,47 +189,216 @@
             return new Promise((resolve) => {
                 let attempts = 0;
                 const check = () => {
-                    if (document.body) {
-                        resolve(true);
-                        return;
-                    }
+                    if (document.documentElement && document.body) { resolve(true); return; }
                     attempts += 1;
-                    if (attempts >= maxAttempts) {
-                        resolve(false);
-                        return;
-                    }
+                    if (attempts >= maxAttempts) { resolve(false); return; }
                     setTimeout(check, interval);
                 };
                 check();
             });
         },
 
-        async openSettings(onSave, attempts = 3) {
-            const currentConfig = ConfigManager.load();
-            for (let attempt = 1; attempt <= attempts; attempt += 1) {
-                try {
-                    const opened = await this.createSettingsModal(currentConfig, onSave);
-                    if (opened) return true;
-                } catch (error) {
-                    console.error(`[YT Enhancer] Tentativa ${attempt} falhou ao abrir modal:`, error);
+        async openSettings(onSave) {
+            const config = ConfigManager.load();
+            const rootReady = await this.ensureRootReady();
+            if (!rootReady) return false;
+
+            this.ensureStyles();
+            this.cleanupFunctions.forEach(fn => fn());
+            this.cleanupFunctions = [];
+
+            document.getElementById('yt-enhancer-settings-modal')?.remove();
+            document.getElementById('yt-enhancer-overlay')?.remove();
+
+            const create = (tag, options = {}) => {
+                const el = document.createElement(tag);
+                if (options.id) el.id = options.id;
+                if (options.className) el.className = options.className;
+                if (options.text) el.textContent = options.text;
+                if (options.type) el.type = options.type;
+                if (options.value !== undefined) el.value = options.value;
+                if (options.checked !== undefined) el.checked = !!options.checked;
+                if (options.min !== undefined) el.min = String(options.min);
+                if (options.max !== undefined) el.max = String(options.max);
+                if (options.step !== undefined) el.step = String(options.step);
+                if (options.forId) el.htmlFor = options.forId;
+                if (options.dataset) Object.assign(el.dataset, options.dataset);
+                return el;
+            };
+
+            const overlay = create('div', { id: 'yt-enhancer-overlay' });
+            overlay.style.cssText = 'position: fixed !important; inset: 0 !important; background: rgba(0,0,0,0.75) !important; z-index: 2147483646 !important; pointer-events: auto !important;';
+
+            const modal = create('div', { id: 'yt-enhancer-settings-modal', className: 'yt-enhancer-modal' });
+            
+            // Header
+            const modalHeader = create('div', { className: 'modal-header' });
+            modalHeader.append(
+                create('h2', { className: 'modal-title', text: t('modal.title', config.LANGUAGE) }),
+                create('button', { id: 'yt-enhancer-close', className: 'close-btn', text: '×' })
+            );
+
+            // Tabs
+            const tabsNav = create('div', { className: 'tabs-nav' });
+            const tabFeaturesBtn = create('button', { className: 'tab-btn active', text: t('modal.tabs.features', config.LANGUAGE), dataset: { target: 'tab-features' } });
+            const tabAppearanceBtn = create('button', { className: 'tab-btn', text: t('modal.tabs.appearance', config.LANGUAGE), dataset: { target: 'tab-appearance' } });
+            tabsNav.append(tabFeaturesBtn, tabAppearanceBtn);
+
+            // Content
+            const modalContent = create('div', { className: 'modal-content' });
+            
+            // Features Tab
+            const tabFeatures = create('div', { id: 'tab-features', className: 'tab-pane active' });
+            const optionsList = create('div', { className: 'options-list' });
+
+            const createToggle = (id, title, description, checked) => {
+                const label = create('label', { className: 'feature-toggle' });
+                const textWrap = create('div', { className: 'toggle-text' });
+                textWrap.append(create('strong', { text: title }), create('span', { text: description }));
+                const switchWrap = create('div', { className: 'toggle-switch' });
+                switchWrap.append(create('input', { id, type: 'checkbox', checked }), create('span', { className: 'slider' }));
+                label.append(textWrap, switchWrap);
+                return label;
+            };
+
+            optionsList.append(
+                createToggle('cfg-cpu-tamer', t('modal.features.cpuTamer.title', config.LANGUAGE), t('modal.features.cpuTamer.description', config.LANGUAGE), config.FEATURES.CPU_TAMER),
+                createToggle('cfg-layout', t('modal.features.layout.title', config.LANGUAGE), t('modal.features.layout.description', config.LANGUAGE), config.FEATURES.LAYOUT_ENHANCEMENT)
+            );
+
+            const layoutSettings = create('label', { id: 'layout-settings', className: 'feature-toggle feature-card-input', forId: 'cfg-videos-row' });
+            layoutSettings.style.display = config.FEATURES.LAYOUT_ENHANCEMENT ? 'flex' : 'none';
+            const layoutText = create('div', { className: 'toggle-text' });
+            layoutText.append(create('strong', { text: t('modal.features.videosPerRow', config.LANGUAGE) }), create('span', { text: t('modal.features.videosPerRowHint', config.LANGUAGE) }));
+            layoutSettings.append(layoutText, create('input', { id: 'cfg-videos-row', className: 'styled-input-small', type: 'number', min: 3, max: 8, value: config.VIDEOS_PER_ROW }));
+            optionsList.append(layoutSettings);
+
+            optionsList.append(
+                createToggle('cfg-shorts', t('modal.features.shorts.title', config.LANGUAGE), t('modal.features.shorts.description', config.LANGUAGE), config.FEATURES.SHORTS_REMOVAL),
+                createToggle('cfg-clock-enable', t('modal.features.clock.title', config.LANGUAGE), t('modal.features.clock.description', config.LANGUAGE), config.FEATURES.FULLSCREEN_CLOCK),
+                createToggle('cfg-rtx-visual', t('modal.features.rtx.title', config.LANGUAGE), t('modal.features.rtx.description', config.LANGUAGE), config.FEATURES.RTX_VISUAL_MODE)
+            );
+
+            const languageCard = create('label', { className: 'feature-toggle feature-card-select', forId: 'cfg-language' });
+            const languageText = create('div', { className: 'toggle-text' });
+            languageText.append(create('strong', { text: t('modal.features.language.title', config.LANGUAGE) }), create('span', { text: t('modal.features.language.description', config.LANGUAGE) }));
+            const languageSelect = create('select', { id: 'cfg-language', className: 'styled-select' });
+            [{ value: 'en', label: 'English' }, { value: 'pt', label: 'Português' }].forEach(({ value, label }) => {
+                const option = create('option', { value, text: label });
+                if (config.LANGUAGE === value) option.selected = true;
+                languageSelect.appendChild(option);
+            });
+            languageCard.append(languageText, languageSelect);
+            optionsList.append(languageCard);
+            tabFeatures.appendChild(optionsList);
+
+            // Appearance Tab
+            const tabAppearance = create('div', { id: 'tab-appearance', className: 'tab-pane' });
+            const appearanceGrid = create('div', { className: 'appearance-grid' });
+            const createControl = (id, labelText, inputEl, valueEl = null) => {
+                const group = create('div', { className: 'control-group' });
+                group.append(create('label', { text: labelText }), inputEl);
+                if (valueEl) {
+                    const wrap = create('div', { className: 'color-input-wrapper' });
+                    wrap.append(inputEl, valueEl);
+                    group.replaceChild(wrap, inputEl);
                 }
-                await new Promise((resolve) => setTimeout(resolve, 180 * attempt));
-            }
-            return false;
+                inputEl.id = id;
+                return group;
+            };
+
+            appearanceGrid.append(
+                createControl('style-color', t('modal.clockStyle.textColor', config.LANGUAGE), create('input', { type: 'color', value: config.CLOCK_STYLE.color }), create('span', { className: 'color-value', text: config.CLOCK_STYLE.color })),
+                createControl('style-bg-color', t('modal.clockStyle.backgroundColor', config.LANGUAGE), create('input', { type: 'color', value: config.CLOCK_STYLE.bgColor }), create('span', { className: 'color-value', text: config.CLOCK_STYLE.bgColor })),
+                createControl('style-bg-opacity', t('modal.clockStyle.backgroundOpacity', config.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 0, max: 1, step: 0.1, value: config.CLOCK_STYLE.bgOpacity })),
+                createControl('style-font-size', t('modal.clockStyle.fontSize', config.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 12, max: 100, value: config.CLOCK_STYLE.fontSize })),
+                createControl('style-margin', t('modal.clockStyle.margin', config.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 0, max: 200, value: config.CLOCK_STYLE.margin })),
+                createControl('style-border-radius', t('modal.clockStyle.borderRadius', config.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 0, max: 50, value: config.CLOCK_STYLE.borderRadius || 12 }))
+            );
+            tabAppearance.appendChild(appearanceGrid);
+            modalContent.append(tabFeatures, tabAppearance);
+
+            // Footer
+            const modalFooter = create('div', { className: 'modal-footer' });
+            const reloadNotice = create('p', { id: 'yt-enhancer-reload-note', className: 'reload-note', text: t('modal.reloadNotice', config.LANGUAGE) });
+            reloadNotice.style.display = 'none';
+            const modalActions = create('div', { className: 'modal-actions' });
+            const btnApply = create('button', { id: 'yt-enhancer-apply', className: 'btn btn-primary', text: t('modal.buttons.apply', config.LANGUAGE) });
+            const btnReload = create('button', { id: 'yt-enhancer-reload', className: 'btn btn-primary', text: t('modal.buttons.applyAndReload', config.LANGUAGE) });
+            btnReload.style.display = 'none';
+            
+            modalActions.append(btnApply, btnReload);
+            modalFooter.append(reloadNotice, modalActions);
+            modal.append(modalHeader, tabsNav, modalContent, modalFooter);
+
+            // FIX: Montar o modal no documentElement (HTML) escapa das restrições de formatação do BODY no YouTube
+            const mountTarget = document.documentElement || document.body;
+            mountTarget.append(overlay, modal);
+
+            // Handlers
+            const closeModal = () => { modal.remove(); overlay.remove(); this.cleanupFunctions.forEach(fn => fn()); };
+            this.cleanupFunctions.push(Utils.safeAddEventListener(overlay, 'click', closeModal));
+            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('yt-enhancer-close'), 'click', closeModal));
+
+            [tabFeaturesBtn, tabAppearanceBtn].forEach((btn) => {
+                this.cleanupFunctions.push(Utils.safeAddEventListener(btn, 'click', () => {
+                    [tabFeaturesBtn, tabAppearanceBtn].forEach((b) => b.classList.remove('active'));
+                    [tabFeatures, tabAppearance].forEach((pane) => pane.classList.remove('active'));
+                    btn.classList.add('active');
+                    (btn.dataset.target === 'tab-features' ? tabFeatures : tabAppearance).classList.add('active');
+                }));
+            });
+
+            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-layout'), 'change', (e) => {
+                layoutSettings.style.display = e.target.checked ? 'flex' : 'none';
+            }));
+
+            ['style-color', 'style-bg-color'].forEach(id => {
+                this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById(id), 'input', (e) => {
+                    if (e.target.nextElementSibling) e.target.nextElementSibling.textContent = e.target.value;
+                }));
+            });
+
+            const getNewConfig = () => Utils.sanitizeConfig({
+                LANGUAGE: document.getElementById('cfg-language').value,
+                VIDEOS_PER_ROW: parseInt(document.getElementById('cfg-videos-row').value, 10) || 5,
+                FEATURES: {
+                    CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
+                    LAYOUT_ENHANCEMENT: document.getElementById('cfg-layout').checked,
+                    SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked,
+                    FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked,
+                    RTX_VISUAL_MODE: document.getElementById('cfg-rtx-visual').checked
+                },
+                CLOCK_STYLE: {
+                    color: document.getElementById('style-color').value,
+                    bgColor: document.getElementById('style-bg-color').value,
+                    bgOpacity: parseFloat(document.getElementById('style-bg-opacity').value),
+                    fontSize: parseInt(document.getElementById('style-font-size').value, 10),
+                    margin: parseInt(document.getElementById('style-margin').value, 10),
+                    borderRadius: parseInt(document.getElementById('style-border-radius').value, 10),
+                    position: 'bottom-right'
+                }
+            }, ConfigManager.defaults);
+
+            const updateSaveButtons = () => {
+                const newConfig = getNewConfig();
+                const requiresReload = newConfig.FEATURES.CPU_TAMER !== config.FEATURES.CPU_TAMER || newConfig.LANGUAGE !== config.LANGUAGE;
+                btnApply.style.display = requiresReload ? 'none' : 'block';
+                btnReload.style.display = requiresReload ? 'block' : 'none';
+                reloadNotice.style.display = requiresReload ? 'block' : 'none';
+            };
+
+            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-cpu-tamer'), 'change', updateSaveButtons));
+            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-language'), 'change', updateSaveButtons));
+            this.cleanupFunctions.push(Utils.safeAddEventListener(btnApply, 'click', () => { onSave(getNewConfig()); closeModal(); }));
+            this.cleanupFunctions.push(Utils.safeAddEventListener(btnReload, 'click', () => { onSave(getNewConfig()); closeModal(); setTimeout(() => window.location.reload(), 100); }));
+
+            return true;
         },
 
         ensureStyles() {
-            if (document.getElementById(this.styleId)) return;
             const css = `
-                .yt-enhancer-modal {
-                    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-                    width: min(420px, calc(100vw - 32px)); max-height: 80vh;
-                    background: #121212; color: #f1f1f1;
-                    border: 1px solid #333; border-radius: 12px;
-                    box-shadow: 0 12px 24px rgba(0,0,0,0.5);
-                    font-family: 'Roboto', Arial, sans-serif; font-size: 14px;
-                    display: flex; flex-direction: column; z-index: 2147483647; isolation: isolate;
-                }
+                .yt-enhancer-modal { position: fixed !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) !important; width: min(420px, calc(100vw - 32px)) !important; max-height: 80vh !important; background: #121212 !important; color: #f1f1f1 !important; border: 1px solid #333 !important; border-radius: 12px !important; box-shadow: 0 12px 24px rgba(0,0,0,0.8) !important; font-family: 'Roboto', Arial, sans-serif !important; font-size: 14px !important; display: flex !important; flex-direction: column !important; z-index: 2147483647 !important; isolation: isolate !important; }
                 input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
                 input[type=number] { -moz-appearance: textfield; }
                 .modal-header { height: 50px; border-bottom: 1px solid #333; display: flex; align-items: center; justify-content: flex-end; padding: 0 15px; position: relative; }
@@ -371,290 +439,35 @@
                 .btn-primary { background: #3ea6ff; color: #000; }
                 .btn-primary:hover { opacity: 0.9; }
             `;
-            try {
-                // CORREÇÃO: Utiliza GM_addStyle em vez de document.createElement('style') para contornar o CSP.
-                const styleEl = GM_addStyle(css);
-                styleEl.id = this.styleId;
-            } catch (e) {
-                console.error('[YT Enhancer] Falha ao injetar CSS com GM_addStyle:', e);
-            }
-        },
-
-        createSettingsModal: async function(currentConfig, onSave) {
-            const rootReady = await this.ensureRootReady();
-            if (!rootReady) return false;
-
-            this.ensureStyles();
-            this.cleanupFunctions.forEach(fn => fn());
-            this.cleanupFunctions = [];
-
-            document.getElementById('yt-enhancer-settings-modal')?.remove();
-            document.getElementById('yt-enhancer-overlay')?.remove();
-
-            const create = (tag, options = {}) => {
-                const el = document.createElement(tag);
-                if (options.id) el.id = options.id;
-                if (options.className) el.className = options.className;
-                if (options.text) el.textContent = options.text;
-                if (options.title) el.title = options.title;
-                if (options.type) el.type = options.type;
-                if (options.value !== undefined) el.value = options.value;
-                if (options.checked !== undefined) el.checked = !!options.checked;
-                if (options.min !== undefined) el.min = String(options.min);
-                if (options.max !== undefined) el.max = String(options.max);
-                if (options.step !== undefined) el.step = String(options.step);
-                if (options.forId) el.htmlFor = options.forId;
-                if (options.dataset) Object.assign(el.dataset, options.dataset);
-                if (options.style) Object.assign(el.style, options.style);
-                return el;
-            };
-
-            const overlay = create('div', { id: 'yt-enhancer-overlay' });
-            overlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 2147483646; pointer-events: auto;';
-
-            const modal = create('div', { id: 'yt-enhancer-settings-modal', className: 'yt-enhancer-modal' });
-            const modalHeader = create('div', { className: 'modal-header' });
-            modalHeader.append(
-                create('h2', { className: 'modal-title', text: t('modal.title', currentConfig.LANGUAGE) }),
-                create('button', { id: 'yt-enhancer-close', className: 'close-btn', text: '×', title: t('modal.closeTitle', currentConfig.LANGUAGE) })
-            );
-
-            const tabsNav = create('div', { className: 'tabs-nav' });
-            const tabFeaturesBtn = create('button', { className: 'tab-btn active', text: t('modal.tabs.features', currentConfig.LANGUAGE), dataset: { target: 'tab-features' } });
-            const tabAppearanceBtn = create('button', { className: 'tab-btn', text: t('modal.tabs.appearance', currentConfig.LANGUAGE), dataset: { target: 'tab-appearance' } });
-            tabsNav.append(tabFeaturesBtn, tabAppearanceBtn);
-
-            const modalContent = create('div', { className: 'modal-content' });
-            const tabFeatures = create('div', { id: 'tab-features', className: 'tab-pane active' });
-            const optionsList = create('div', { className: 'options-list' });
-
-            const createToggle = (id, title, description, checked) => {
-                const label = create('label', { className: 'feature-toggle' });
-                const textWrap = create('div', { className: 'toggle-text' });
-                textWrap.append(create('strong', { text: title }), create('span', { text: description }));
-                const switchWrap = create('div', { className: 'toggle-switch' });
-                const input = create('input', { id, type: 'checkbox', checked });
-                switchWrap.append(input, create('span', { className: 'slider' }));
-                label.append(textWrap, switchWrap);
-                return label;
-            };
-
-            optionsList.append(
-                createToggle('cfg-cpu-tamer', t('modal.features.cpuTamer.title', currentConfig.LANGUAGE), t('modal.features.cpuTamer.description', currentConfig.LANGUAGE), currentConfig.FEATURES.CPU_TAMER),
-                createToggle('cfg-layout', t('modal.features.layout.title', currentConfig.LANGUAGE), t('modal.features.layout.description', currentConfig.LANGUAGE), currentConfig.FEATURES.LAYOUT_ENHANCEMENT)
-            );
-
-            const layoutSettings = create('label', { id: 'layout-settings', className: 'feature-toggle feature-card-input', forId: 'cfg-videos-row' });
-            if (!currentConfig.FEATURES.LAYOUT_ENHANCEMENT) layoutSettings.style.display = 'none';
-            const layoutText = create('div', { className: 'toggle-text' });
-            layoutText.append(create('strong', { text: t('modal.features.videosPerRow', currentConfig.LANGUAGE) }), create('span', { text: t('modal.features.videosPerRowHint', currentConfig.LANGUAGE) }));
-            layoutSettings.append(layoutText, create('input', { id: 'cfg-videos-row', className: 'styled-input-small', type: 'number', min: 3, max: 8, value: currentConfig.VIDEOS_PER_ROW }));
-            optionsList.append(layoutSettings);
-
-            optionsList.append(
-                createToggle('cfg-shorts', t('modal.features.shorts.title', currentConfig.LANGUAGE), t('modal.features.shorts.description', currentConfig.LANGUAGE), currentConfig.FEATURES.SHORTS_REMOVAL),
-                createToggle('cfg-clock-enable', t('modal.features.clock.title', currentConfig.LANGUAGE), t('modal.features.clock.description', currentConfig.LANGUAGE), currentConfig.FEATURES.FULLSCREEN_CLOCK),
-                createToggle('cfg-rtx-visual', t('modal.features.rtx.title', currentConfig.LANGUAGE), t('modal.features.rtx.description', currentConfig.LANGUAGE), currentConfig.FEATURES.RTX_VISUAL_MODE)
-            );
-
-            const languageCard = create('label', { className: 'feature-toggle feature-card-select', forId: 'cfg-language' });
-            const languageText = create('div', { className: 'toggle-text' });
-            languageText.append(create('strong', { text: t('modal.features.language.title', currentConfig.LANGUAGE) }), create('span', { text: t('modal.features.language.description', currentConfig.LANGUAGE) }));
-            const languageSelect = create('select', { id: 'cfg-language', className: 'styled-select' });
-            [{ value: 'en', label: 'English' }, { value: 'pt', label: 'Português' }].forEach(({ value, label }) => {
-                const option = create('option', { value, text: label });
-                if (currentConfig.LANGUAGE === value) option.selected = true;
-                languageSelect.appendChild(option);
-            });
-            languageCard.append(languageText, languageSelect);
-            optionsList.append(languageCard);
-
-            tabFeatures.appendChild(optionsList);
-
-            const tabAppearance = create('div', { id: 'tab-appearance', className: 'tab-pane' });
-            const appearanceGrid = create('div', { className: 'appearance-grid' });
-            const createControl = (id, labelText, inputEl, valueEl = null) => {
-                const group = create('div', { className: 'control-group' });
-                group.append(create('label', { text: labelText }), inputEl);
-                if (valueEl) {
-                    const wrap = create('div', { className: 'color-input-wrapper' });
-                    wrap.append(inputEl, valueEl);
-                    group.replaceChild(wrap, inputEl);
-                }
-                inputEl.id = id;
-                return group;
-            };
-
-            const colorInput = create('input', { type: 'color', value: currentConfig.CLOCK_STYLE.color });
-            const colorValue = create('span', { className: 'color-value', text: currentConfig.CLOCK_STYLE.color });
-            appearanceGrid.appendChild(createControl('style-color', t('modal.clockStyle.textColor', currentConfig.LANGUAGE), colorInput, colorValue));
-
-            const bgColorInput = create('input', { type: 'color', value: currentConfig.CLOCK_STYLE.bgColor });
-            const bgColorValue = create('span', { className: 'color-value', text: currentConfig.CLOCK_STYLE.bgColor });
-            appearanceGrid.appendChild(createControl('style-bg-color', t('modal.clockStyle.backgroundColor', currentConfig.LANGUAGE), bgColorInput, bgColorValue));
-
-            appearanceGrid.appendChild(createControl('style-bg-opacity', t('modal.clockStyle.backgroundOpacity', currentConfig.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 0, max: 1, step: 0.1, value: currentConfig.CLOCK_STYLE.bgOpacity })));
-            appearanceGrid.appendChild(createControl('style-font-size', t('modal.clockStyle.fontSize', currentConfig.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 12, max: 100, value: currentConfig.CLOCK_STYLE.fontSize })));
-            appearanceGrid.appendChild(createControl('style-margin', t('modal.clockStyle.margin', currentConfig.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 0, max: 200, value: currentConfig.CLOCK_STYLE.margin })));
-            appearanceGrid.appendChild(createControl('style-border-radius', t('modal.clockStyle.borderRadius', currentConfig.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 0, max: 50, value: currentConfig.CLOCK_STYLE.borderRadius || 12 })));
-
-            tabAppearance.appendChild(appearanceGrid);
-            modalContent.append(tabFeatures, tabAppearance);
-
-            const modalFooter = create('div', { className: 'modal-footer' });
-            const reloadNotice = create('p', { id: 'yt-enhancer-reload-note', className: 'reload-note', text: t('modal.reloadNotice', currentConfig.LANGUAGE) });
-            reloadNotice.style.display = 'none';
-            const modalActions = create('div', { className: 'modal-actions' });
-            const btnApply = create('button', { id: 'yt-enhancer-apply', className: 'btn btn-primary', text: t('modal.buttons.apply', currentConfig.LANGUAGE) });
-            const btnReload = create('button', { id: 'yt-enhancer-reload', className: 'btn btn-primary', text: t('modal.buttons.applyAndReload', currentConfig.LANGUAGE) });
-            btnReload.style.display = 'none';
-            modalActions.append(btnApply, btnReload);
-            modalFooter.append(reloadNotice, modalActions);
-
-            modal.append(modalHeader, tabsNav, modalContent, modalFooter);
-            const mountTarget = document.body || document.documentElement;
-            if (!mountTarget) return false;
-            
-            mountTarget.append(overlay, modal);
-
-            const closeModal = () => {
-                modal.remove();
-                overlay.remove();
-                this.cleanupFunctions.forEach(fn => fn());
-                this.cleanupFunctions = [];
-            };
-
-            this.cleanupFunctions.push(Utils.safeAddEventListener(overlay, 'click', closeModal));
-            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('yt-enhancer-close'), 'click', closeModal));
-
-            [tabFeaturesBtn, tabAppearanceBtn].forEach((btn) => {
-                this.cleanupFunctions.push(Utils.safeAddEventListener(btn, 'click', () => {
-                    [tabFeaturesBtn, tabAppearanceBtn].forEach((b) => b.classList.remove('active'));
-                    [tabFeatures, tabAppearance].forEach((pane) => pane.classList.remove('active'));
-                    btn.classList.add('active');
-                    (btn.dataset.target === 'tab-features' ? tabFeatures : tabAppearance).classList.add('active');
-                }));
-            });
-
-            const layoutToggle = document.getElementById('cfg-layout');
-            this.cleanupFunctions.push(Utils.safeAddEventListener(layoutToggle, 'change', (e) => {
-                layoutSettings.style.display = e.target.checked ? 'flex' : 'none';
-            }));
-
-            ['style-color', 'style-bg-color'].forEach(id => {
-                this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById(id), 'input', (e) => {
-                    if (e.target.nextElementSibling) e.target.nextElementSibling.textContent = e.target.value;
-                }));
-            });
-
-            const getNewConfig = () => Utils.sanitizeConfig({
-                LANGUAGE: document.getElementById('cfg-language').value,
-                VIDEOS_PER_ROW: parseInt(document.getElementById('cfg-videos-row').value, 10) || 5,
-                FEATURES: {
-                    CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
-                    LAYOUT_ENHANCEMENT: document.getElementById('cfg-layout').checked,
-                    SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked,
-                    FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked,
-                    RTX_VISUAL_MODE: document.getElementById('cfg-rtx-visual').checked
-                },
-                CLOCK_STYLE: {
-                    color: document.getElementById('style-color').value,
-                    bgColor: document.getElementById('style-bg-color').value,
-                    bgOpacity: parseFloat(document.getElementById('style-bg-opacity').value),
-                    fontSize: parseInt(document.getElementById('style-font-size').value, 10),
-                    margin: parseInt(document.getElementById('style-margin').value, 10),
-                    borderRadius: parseInt(document.getElementById('style-border-radius').value, 10),
-                    position: 'bottom-right'
-                }
-            }, ConfigManager.defaults);
-
-            const initialCpuState = currentConfig.FEATURES.CPU_TAMER;
-            const initialLanguageState = currentConfig.LANGUAGE;
-
-            const updateSaveButtons = () => {
-                const newConfig = getNewConfig();
-                const requiresReload = newConfig.FEATURES.CPU_TAMER !== initialCpuState || newConfig.LANGUAGE !== initialLanguageState;
-                btnApply.style.display = requiresReload ? 'none' : 'block';
-                btnReload.style.display = requiresReload ? 'block' : 'none';
-                reloadNotice.style.display = requiresReload ? 'block' : 'none';
-            };
-
-            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-cpu-tamer'), 'change', updateSaveButtons));
-            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-language'), 'change', updateSaveButtons));
-            this.cleanupFunctions.push(Utils.safeAddEventListener(btnApply, 'click', () => {
-                onSave(getNewConfig());
-                closeModal();
-            }));
-            this.cleanupFunctions.push(Utils.safeAddEventListener(btnReload, 'click', () => {
-                onSave(getNewConfig());
-                closeModal();
-                setTimeout(() => window.location.reload(), 100);
-            }));
-
-            return true;
+            Utils.injectCSS(css, this.styleId);
         }
     };
 
     // =======================================================
-    // 3. STYLE MANAGER (Corrigido para uso do GM_addStyle)
+    // 3. STYLE MANAGER
     // =======================================================
     const StyleManager = {
         styleId: 'yt-enhancer-styles',
-        
-        init() {
-            EventBus.on('configChanged', (config) => this.apply(config));
-        },
-        
-        apply: function(config) {
-            const old = document.getElementById(this.styleId);
-            if (old) old.remove();
-
-            if (!config.FEATURES.LAYOUT_ENHANCEMENT && !config.FEATURES.SHORTS_REMOVAL && !config.FEATURES.RTX_VISUAL_MODE) return;
-
+        init() { EventBus.on('configChanged', (config) => this.apply(config)); },
+        apply(config) {
             let css = '';
             if (config.FEATURES.LAYOUT_ENHANCEMENT) {
-                css += `
-                    ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${config.VIDEOS_PER_ROW} !important; }
-                    @media (max-width: 1200px) { ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${Math.min(config.VIDEOS_PER_ROW, 4)} !important; } }
-                `;
+                css += `ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${config.VIDEOS_PER_ROW} !important; } @media (max-width: 1200px) { ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${Math.min(config.VIDEOS_PER_ROW, 4)} !important; } }`;
             }
             if (config.FEATURES.SHORTS_REMOVAL) {
-                css += `
-                    ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]),
-                    ytd-reel-shelf-renderer, ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]),
-                    ytd-guide-entry-renderer:has(a[href^="/shorts"]), ytd-guide-entry-renderer:has(a[href*="/shorts/"]),
-                    ytd-mini-guide-entry-renderer:has(a[href^="/shorts"]), ytd-mini-guide-entry-renderer:has(a[href*="/shorts/"]),
-                    ytd-guide-entry-renderer:has(a[title="Shorts"]), ytd-mini-guide-entry-renderer[aria-label="Shorts"] {
-                        display: none !important; 
-                    }
-                `;
+                css += `ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]), ytd-guide-entry-renderer:has(a[href^="/shorts"]), ytd-guide-entry-renderer:has(a[href*="/shorts/"]), ytd-mini-guide-entry-renderer:has(a[href^="/shorts"]), ytd-mini-guide-entry-renderer:has(a[href*="/shorts/"]), ytd-guide-entry-renderer:has(a[title="Shorts"]), ytd-mini-guide-entry-renderer[aria-label="Shorts"] { display: none !important; }`;
             }
             if (config.FEATURES.RTX_VISUAL_MODE) {
-                css += `
-                    :root { --yt-spec-general-background-a: transparent !important; --yt-spec-general-background-b: transparent !important; --yt-spec-raised-background: transparent !important; --yt-spec-10-percent-layer: transparent !important; --yt-spec-badge-chip-background: transparent !important; --rtx-player-menu-background: rgba(15, 15, 15, 0.96) !important; }
-                    ytd-app *, tp-yt-iron-dropdown, tp-yt-paper-dialog, yt-confirm-dialog-renderer, ytd-popup-container, ytd-multi-page-menu-renderer, ytd-mini-guide-renderer, ytd-guide-renderer, ytd-searchbox, ytd-watch-flexy, ytd-live-chat-frame, .ytp-popup, .ytp-panel, .ytp-tooltip, .ytp-settings-menu, .ytp-menuitem, .iv-drawer, .sbdd_a, [style*="backdrop-filter"], [style*="-webkit-backdrop-filter"] { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-                    ytd-app [style*="rgba("], ytd-app [style*="rgb("], ytd-app [style*="background:"], ytd-app [style*="background-color:"] { background-image: none !important; box-shadow: none !important; }
-                    ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-popup-container tp-yt-paper-dialog, ytd-multi-page-menu-renderer, tp-yt-iron-dropdown, .ytp-popup { background: transparent !important; background-color: transparent !important; }
-                    .ytp-settings-menu, .ytp-panel, .ytp-panel-menu, .ytp-popup.ytp-contextmenu { background: var(--rtx-player-menu-background) !important; background-color: var(--rtx-player-menu-background) !important; }
-                    ytd-popup-container tp-yt-paper-dialog, ytd-multi-page-menu-renderer, ytd-notification-topbar-button-renderer tp-yt-paper-dialog, ytd-account-menu { --yt-spec-general-background-a: var(--yt-spec-base-background) !important; --yt-spec-general-background-b: var(--yt-spec-base-background) !important; --yt-spec-raised-background: var(--yt-spec-base-background) !important; background: var(--yt-spec-base-background) !important; background-color: var(--yt-spec-base-background) !important; }
-                `;
+                css += `:root { --yt-spec-general-background-a: transparent !important; --yt-spec-general-background-b: transparent !important; --yt-spec-raised-background: transparent !important; --yt-spec-10-percent-layer: transparent !important; --yt-spec-badge-chip-background: transparent !important; --rtx-player-menu-background: rgba(15, 15, 15, 0.96) !important; } ytd-app *, tp-yt-iron-dropdown, tp-yt-paper-dialog, yt-confirm-dialog-renderer, ytd-popup-container, ytd-multi-page-menu-renderer, ytd-mini-guide-renderer, ytd-guide-renderer, ytd-searchbox, ytd-watch-flexy, ytd-live-chat-frame, .ytp-popup, .ytp-panel, .ytp-tooltip, .ytp-settings-menu, .ytp-menuitem, .iv-drawer, .sbdd_a, [style*="backdrop-filter"], [style*="-webkit-backdrop-filter"] { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; } ytd-app [style*="rgba("], ytd-app [style*="rgb("], ytd-app [style*="background:"], ytd-app [style*="background-color:"] { background-image: none !important; box-shadow: none !important; } ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-popup-container tp-yt-paper-dialog, ytd-multi-page-menu-renderer, tp-yt-iron-dropdown, .ytp-popup { background: transparent !important; background-color: transparent !important; } .ytp-settings-menu, .ytp-panel, .ytp-panel-menu, .ytp-popup.ytp-contextmenu { background: var(--rtx-player-menu-background) !important; background-color: var(--rtx-player-menu-background) !important; } ytd-popup-container tp-yt-paper-dialog, ytd-multi-page-menu-renderer, ytd-notification-topbar-button-renderer tp-yt-paper-dialog, ytd-account-menu { --yt-spec-general-background-a: var(--yt-spec-base-background) !important; --yt-spec-general-background-b: var(--yt-spec-base-background) !important; --yt-spec-raised-background: var(--yt-spec-base-background) !important; background: var(--yt-spec-base-background) !important; background-color: var(--yt-spec-base-background) !important; }`;
             }
-
-            try {
-                // CORREÇÃO: Utiliza GM_addStyle
-                const styleEl = GM_addStyle(css);
-                styleEl.id = this.styleId;
-            } catch (error) {
-                console.error('[YT Enhancer] Falha ao aplicar estilos visuais:', error);
-            }
+            Utils.injectCSS(css, this.styleId);
         }
     };
 
     // =======================================================
-    // SHORTS MANAGER (Não modificado por ser seguro)
+    // SHORTS MANAGER
     // =======================================================
     const ShortsManager = {
-        // ... (Mesmo código anterior) ...
         observer: null, listenersCleanup: [], hiddenElements: new Set(), enabled: false,
         debouncedPrune: Utils.debounce(function() { if (this.enabled) this.prune(); }, 150),
         init(config) { this.updateConfig(config); EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig)); },
@@ -672,11 +485,7 @@
                 this.observer.observe(document.documentElement, { childList: true, subtree: true });
             }
             if (this.listenersCleanup.length === 0) {
-                this.listenersCleanup.push(
-                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune())
-                );
+                this.listenersCleanup.push(Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()), Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()), Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune()));
             }
         },
         stop() {
@@ -693,36 +502,25 @@
         restoreHiddenElements() {
             for (const element of this.hiddenElements) {
                 if (!(element instanceof HTMLElement)) continue;
-                const previousDisplay = element.dataset.ytEnhancerPrevDisplay || '';
-                if (previousDisplay) element.style.display = previousDisplay;
-                else element.style.removeProperty('display');
+                const prev = element.dataset.ytEnhancerPrevDisplay || '';
+                if (prev) element.style.display = prev; else element.style.removeProperty('display');
                 delete element.dataset.ytEnhancerPrevDisplay;
             }
             this.hiddenElements.clear();
         },
         prune() {
-            const elementsToHide = new Set();
-            document.querySelectorAll('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach((node) => {
-                elementsToHide.add(node);
-                const section = node.closest('ytd-rich-section-renderer');
-                if (section) elementsToHide.add(section);
-            });
-            document.querySelectorAll('ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach((marker) => {
-                const card = marker.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-item-section-renderer');
-                if (card) elementsToHide.add(card);
-            });
-            document.querySelectorAll('a[href^="/shorts"], a[href*="/shorts/"], a[title="Shorts"], [aria-label="Shorts"]').forEach((link) => {
-                const entry = link.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item');
-                if (entry) elementsToHide.add(entry);
-            });
-            document.querySelectorAll('ytd-reel-item-renderer, ytd-rich-item-renderer:has(a[href^="/shorts/"])').forEach((item) => { elementsToHide.add(item); });
-            elementsToHide.forEach((element) => this.markHidden(element));
+            const hide = new Set();
+            document.querySelectorAll('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach(n => { hide.add(n); const s = n.closest('ytd-rich-section-renderer'); if(s) hide.add(s); });
+            document.querySelectorAll('ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach(m => { const c = m.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-item-section-renderer'); if(c) hide.add(c); });
+            document.querySelectorAll('a[href^="/shorts"], a[href*="/shorts/"], a[title="Shorts"], [aria-label="Shorts"]').forEach(l => { const e = l.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item'); if(e) hide.add(e); });
+            document.querySelectorAll('ytd-reel-item-renderer, ytd-rich-item-renderer:has(a[href^="/shorts/"])').forEach(i => hide.add(i));
+            hide.forEach(el => this.markHidden(el));
         },
         cleanup() { this.stop(); }
     };
 
     // =======================================================
-    // 4. SMART CPU TAMER CORRIGIDO (Proteção Xray Firefox)
+    // 4. SMART CPU TAMER
     // =======================================================
     const SmartCpuTamer = {
         initialized: false,
@@ -734,34 +532,29 @@
         
         init() {
             if (this.initialized) return;
-            
             this.originals.setInterval = targetWindow.setInterval;
             this.originals.setTimeout = targetWindow.setTimeout;
             this.originals.requestAnimationFrame = targetWindow.requestAnimationFrame;
             this.originals.cancelAnimationFrame = targetWindow.cancelAnimationFrame;
-
             this.bindEvents();
             this.overrideTimers();
             this.initialized = true;
-            log('Smart CPU Tamer v2.2 Ativado (Context Safe + Soft Throttle)');
+            log('Smart CPU Tamer Ativado');
             this.updateState();
         },
 
         cleanup() {
             if (!this.initialized) return;
-            
-            // CORREÇÃO: Restaura com tratamento seguro
-            const safeRestore = (name, original) => {
+            const applyOverride = (name, original) => {
                 try {
-                    if (typeof exportFunction !== 'undefined') exportFunction(original, targetWindow, { defineAs: name });
+                    if (typeof exportFunction === 'function') exportFunction(original, targetWindow, { defineAs: name });
                     else targetWindow[name] = original;
                 } catch(e) {}
             };
-            
-            safeRestore('setInterval', this.originals.setInterval);
-            safeRestore('setTimeout', this.originals.setTimeout);
-            safeRestore('requestAnimationFrame', this.originals.requestAnimationFrame);
-            safeRestore('cancelAnimationFrame', this.originals.cancelAnimationFrame);
+            applyOverride('setInterval', this.originals.setInterval);
+            applyOverride('setTimeout', this.originals.setTimeout);
+            applyOverride('requestAnimationFrame', this.originals.requestAnimationFrame);
+            applyOverride('cancelAnimationFrame', this.originals.cancelAnimationFrame);
             
             if (this.handlers.visibility) document.removeEventListener('visibilitychange', this.handlers.visibility);
             if (this.handlers.play) document.removeEventListener('play', this.handlers.play, true);
@@ -770,38 +563,27 @@
             this.handlers = { visibility: null, play: null, pause: null, ended: null };
 
             if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
-            this.gracePeriodTimer = null;
-
-            this.rafFallbackTimers.forEach((timeoutId) => clearTimeout(timeoutId));
+            this.rafFallbackTimers.forEach(id => clearTimeout(id));
             this.rafFallbackTimers.clear();
-
             if (this.mediaStatePoller) clearInterval(this.mediaStatePoller);
-            this.mediaStatePoller = null;
-            this.mainMediaElement = null;
-
+            this.gracePeriodTimer = null; this.mediaStatePoller = null; this.mainMediaElement = null;
             this.initialized = false;
         },
 
         resolveMainMediaElement(force = false) {
-            const currentMainMedia = this.mainMediaElement;
-            if (!force && currentMainMedia && currentMainMedia.isConnected) return currentMainMedia;
-
-            const mainMedia = Utils.DOMCache.get('#movie_player video.html5-main-video', true) || Utils.DOMCache.get('.html5-video-player video.html5-main-video', true) || Utils.DOMCache.get('#movie_player video', true);
-            this.mainMediaElement = mainMedia || null;
+            if (!force && this.mainMediaElement?.isConnected) return this.mainMediaElement;
+            this.mainMediaElement = Utils.DOMCache.get('#movie_player video.html5-main-video', true) || Utils.DOMCache.get('.html5-video-player video.html5-main-video', true) || Utils.DOMCache.get('#movie_player video', true) || null;
             return this.mainMediaElement;
         },
 
         isMainPlayerMediaEventTarget(target) {
-            if (!(target instanceof HTMLMediaElement)) return false;
-            if (!target.isConnected) return false;
-            const mainMedia = this.resolveMainMediaElement();
-            if (!mainMedia) return false;
-            return target === mainMedia;
+            if (!(target instanceof HTMLMediaElement) || !target.isConnected) return false;
+            return target === this.resolveMainMediaElement();
         },
 
         refreshPlayingFromMainMedia() {
-            const mainMedia = this.resolveMainMediaElement(true);
-            this.state.playing = !!(mainMedia && !mainMedia.paused && !mainMedia.ended && mainMedia.readyState > 2);
+            const media = this.resolveMainMediaElement(true);
+            this.state.playing = !!(media && !media.paused && !media.ended && media.readyState > 2);
         },
 
         bindEvents() {
@@ -809,10 +591,7 @@
                 if (document.visibilityState === 'hidden') {
                     this.state.hidden = true;
                     if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
-                    this.gracePeriodTimer = setTimeout(() => {
-                        this.gracePeriodTimer = null;
-                        this.updateState(true); 
-                    }, this.GRACE_PERIOD_MS);
+                    this.gracePeriodTimer = setTimeout(() => { this.gracePeriodTimer = null; this.updateState(true); }, this.GRACE_PERIOD_MS);
                 } else {
                     this.state.hidden = false;
                     if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
@@ -821,18 +600,17 @@
                 }
             };
             document.addEventListener('visibilitychange', this.handlers.visibility);
-
-            this.handlers.play = (event) => { if (!this.isMainPlayerMediaEventTarget(event.target)) return; this.state.playing = true; this.updateState(); };
-            this.handlers.pause = (event) => { if (!this.isMainPlayerMediaEventTarget(event.target)) return; this.state.playing = false; this.updateState(); };
-            this.handlers.ended = (event) => { if (!this.isMainPlayerMediaEventTarget(event.target)) return; this.state.playing = false; this.updateState(); };
+            this.handlers.play = (e) => { if (this.isMainPlayerMediaEventTarget(e.target)) { this.state.playing = true; this.updateState(); } };
+            this.handlers.pause = (e) => { if (this.isMainPlayerMediaEventTarget(e.target)) { this.state.playing = false; this.updateState(); } };
+            this.handlers.ended = (e) => { if (this.isMainPlayerMediaEventTarget(e.target)) { this.state.playing = false; this.updateState(); } };
             document.addEventListener('play', this.handlers.play, true);
             document.addEventListener('pause', this.handlers.pause, true);
             document.addEventListener('ended', this.handlers.ended, true);
 
             this.mediaStatePoller = setInterval(() => {
-                const wasPlaying = this.state.playing;
+                const was = this.state.playing;
                 this.refreshPlayingFromMainMedia();
-                if (wasPlaying !== this.state.playing) this.updateState();
+                if (was !== this.state.playing) this.updateState();
             }, 1500);
 
             this.state.hidden = document.visibilityState === 'hidden';
@@ -841,66 +619,56 @@
 
         updateState(forceOptimization = false) {
             this.refreshPlayingFromMainMedia();
-            const isGracePeriodActive = this.state.hidden && !forceOptimization && this.gracePeriodTimer;
-
-            if (!this.state.hidden || isGracePeriodActive) this.state.throttlingLevel = 0; 
+            const graceActive = this.state.hidden && !forceOptimization && this.gracePeriodTimer;
+            if (!this.state.hidden || graceActive) this.state.throttlingLevel = 0; 
             else if (this.state.playing) this.state.throttlingLevel = 1; 
             else this.state.throttlingLevel = 2; 
         },
 
         overrideTimers() {
             const self = this;
-            const normalizeDelay = (delay) => { const parsedDelay = Number(delay); return Number.isFinite(parsedDelay) ? parsedDelay : 0; };
-
-            // CORREÇÃO: Função isolada para aplicar os overrides respeitando o Xray do Firefox.
+            const norm = (d) => Number.isFinite(Number(d)) ? Number(d) : 0;
             const applyOverride = (name, customFunc) => {
                 try {
-                    if (typeof exportFunction !== 'undefined') exportFunction(customFunc, targetWindow, { defineAs: name });
+                    if (typeof exportFunction === 'function') exportFunction(customFunc, targetWindow, { defineAs: name });
                     else targetWindow[name] = customFunc;
-                } catch (e) {
-                    console.warn(`[YT Enhancer] Não foi possível sobrescrever ${name}. Funcionalidade desativada para manter a estabilidade.`);
-                }
+                } catch (e) { console.warn(`[YT Enhancer] Cannot override ${name}:`, e); }
             };
 
             applyOverride('setInterval', function(callback, delay, ...args) {
-                const parsedDelay = normalizeDelay(delay);
-                let actualDelay = parsedDelay;
-                if (self.state.throttlingLevel === 2) actualDelay = Math.max(parsedDelay, 5000); 
-                else if (self.state.throttlingLevel === 1) actualDelay = Math.max(parsedDelay, 1000); 
-                return self.originals.setInterval.apply(targetWindow, [callback, actualDelay, ...args]);
+                let d = norm(delay);
+                if (self.state.throttlingLevel === 2) d = Math.max(d, 5000); 
+                else if (self.state.throttlingLevel === 1) d = Math.max(d, 1000); 
+                return self.originals.setInterval.apply(targetWindow, [callback, d, ...args]);
             });
 
             applyOverride('setTimeout', function(callback, delay, ...args) {
-                const parsedDelay = normalizeDelay(delay);
-                let actualDelay = parsedDelay;
-                if (self.state.throttlingLevel === 2) actualDelay = Math.max(parsedDelay, 2000);
-                else if (self.state.throttlingLevel === 1) actualDelay = Math.max(parsedDelay, 250); 
-                return self.originals.setTimeout.apply(targetWindow, [callback, actualDelay, ...args]);
+                let d = norm(delay);
+                if (self.state.throttlingLevel === 2) d = Math.max(d, 2000);
+                else if (self.state.throttlingLevel === 1) d = Math.max(d, 250); 
+                return self.originals.setTimeout.apply(targetWindow, [callback, d, ...args]);
             });
 
             applyOverride('requestAnimationFrame', function(callback) {
                 if (self.state.throttlingLevel > 0) {
-                    const fallbackId = ++self.rafFallbackId;
-                    const throttleDelay = self.state.throttlingLevel === 1 ? 33 : 1000;
-                    const timeoutId = self.originals.setTimeout.call(targetWindow, () => {
-                        self.rafFallbackTimers.delete(fallbackId);
+                    const id = ++self.rafFallbackId;
+                    const d = self.state.throttlingLevel === 1 ? 33 : 1000;
+                    const tid = self.originals.setTimeout.call(targetWindow, () => {
+                        self.rafFallbackTimers.delete(id);
                         callback(performance.now());
-                    }, throttleDelay); 
-                    self.rafFallbackTimers.set(fallbackId, timeoutId);
-                    return fallbackId;
+                    }, d); 
+                    self.rafFallbackTimers.set(id, tid);
+                    return id;
                 }
                 return self.originals.requestAnimationFrame.call(targetWindow, callback);
             });
 
             applyOverride('cancelAnimationFrame', function(id) {
                 if (self.rafFallbackTimers.has(id)) {
-                    const timeoutId = self.rafFallbackTimers.get(id);
-                    self.rafFallbackTimers.delete(id);
-                    return clearTimeout(timeoutId);
+                    clearTimeout(self.rafFallbackTimers.get(id));
+                    return self.rafFallbackTimers.delete(id);
                 }
-                if (typeof self.originals.cancelAnimationFrame === 'function') {
-                    return self.originals.cancelAnimationFrame.call(targetWindow, id);
-                }
+                if (typeof self.originals.cancelAnimationFrame === 'function') return self.originals.cancelAnimationFrame.call(targetWindow, id);
                 return clearTimeout(id);
             });
         }
@@ -910,8 +678,7 @@
     // 5. CLOCK MANAGER
     // =======================================================
     const ClockManager = {
-        // ... (Mesmo código anterior) ...
-        clockElement: null, interval: null, config: null, observer: null, playerElement: null, fullscreenHandler: null, navigationHandler: null,
+        clockElement: null, interval: null, timeInterval: null, config: null, observer: null, playerElement: null, fullscreenHandler: null, navigationHandler: null,
         init(config) {
             this.config = config; this.resolvePlayerElement(true); this.createClock();
             EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
@@ -922,14 +689,14 @@
             this.interval = setInterval(() => this.handleFullscreen(), 2000);
         },
         resolvePlayerElement(force = false) {
-            const currentPlayer = this.playerElement;
-            if (!force && currentPlayer && currentPlayer.isConnected) return currentPlayer;
-            const resolvedPlayer = Utils.DOMCache.get('#movie_player', true) || Utils.DOMCache.get('.html5-video-player', true);
-            if (resolvedPlayer !== currentPlayer) {
+            const current = this.playerElement;
+            if (!force && current?.isConnected) return current;
+            const player = Utils.DOMCache.get('#movie_player', true) || Utils.DOMCache.get('.html5-video-player', true);
+            if (player !== current) {
                 if (this.observer) { this.observer.disconnect(); this.observer = null; }
-                this.playerElement = resolvedPlayer || null;
+                this.playerElement = player || null;
                 if (this.playerElement) this.setupObserver();
-            } else if (!resolvedPlayer) { this.playerElement = null; }
+            } else if (!player) { this.playerElement = null; }
             return this.playerElement;
         },
         updateConfig(newConfig) { this.config = newConfig; this.updateStyle(); this.adjustPosition(); },
@@ -937,8 +704,8 @@
             if (document.getElementById('yt-enhancer-clock')) return;
             const clock = document.createElement('div');
             clock.id = 'yt-enhancer-clock';
-            clock.style.cssText = `position: fixed; pointer-events: none; z-index: 2147483647; font-family: "Roboto", sans-serif; font-weight: 400; padding: 6px 14px; text-shadow: 0 1px 3px rgba(0,0,0,0.8); display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.3); transition: bottom 0.3s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s;`;
-            document.body.appendChild(clock);
+            clock.style.cssText = `position: fixed !important; pointer-events: none !important; z-index: 2147483647 !important; font-family: "Roboto", sans-serif !important; font-weight: 400 !important; padding: 6px 14px !important; text-shadow: 0 1px 3px rgba(0,0,0,0.8) !important; display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.3) !important; transition: bottom 0.3s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s !important;`;
+            document.documentElement.appendChild(clock); // FIX: Afixado na raiz do documento HTML
             this.clockElement = clock;
             this.updateStyle();
         },
@@ -950,23 +717,19 @@
         },
         adjustPosition() {
             if (!this.clockElement) return;
-            if (!this.playerElement || !this.playerElement.isConnected) this.resolvePlayerElement(true);
+            if (!this.playerElement?.isConnected) this.resolvePlayerElement(true);
             if (!this.playerElement) return;
             try {
-                const isFullscreen = document.fullscreenElement != null;
-                const areControlsVisible = !this.playerElement.classList.contains('ytp-autohide');
-                const baseMargin = this.config.CLOCK_STYLE.margin;
-                const finalBottom = (isFullscreen && areControlsVisible) ? baseMargin + 110 : baseMargin;
-                this.clockElement.style.bottom = `${finalBottom}px`;
+                const fs = document.fullscreenElement != null;
+                const controls = !this.playerElement.classList.contains('ytp-autohide');
+                const margin = this.config.CLOCK_STYLE.margin;
+                this.clockElement.style.bottom = `${(fs && controls) ? margin + 110 : margin}px`;
             } catch (e) {}
         },
         updateStyle() {
             if (!this.clockElement) return;
             const s = this.config.CLOCK_STYLE;
-            const hexToRgb = (hex) => {
-                const res = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-                return res ? `${parseInt(res[1],16)},${parseInt(res[2],16)},${parseInt(res[3],16)}` : '0,0,0';
-            };
+            const hexToRgb = (hex) => { const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return r ? `${parseInt(r[1],16)},${parseInt(r[2],16)},${parseInt(r[3],16)}` : '0,0,0'; };
             this.clockElement.style.backgroundColor = `rgba(${hexToRgb(s.bgColor)}, ${s.bgOpacity})`;
             this.clockElement.style.color = s.color;
             this.clockElement.style.fontSize = `${s.fontSize}px`;
@@ -975,16 +738,14 @@
             this.adjustPosition();
         },
         updateTime() {
-            if (!this.clockElement) return;
-            const now = new Date();
-            this.clockElement.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            if (this.clockElement) this.clockElement.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         },
         handleFullscreen() {
             if (!this.config.FEATURES.FULLSCREEN_CLOCK) {
                 if (this.clockElement) this.clockElement.style.display = 'none';
                 return;
             }
-            if (!this.playerElement || !this.playerElement.isConnected) this.resolvePlayerElement(true);
+            if (!this.playerElement?.isConnected) this.resolvePlayerElement(true);
             if (document.fullscreenElement) {
                 if (!this.clockElement) this.createClock();
                 this.clockElement.style.display = 'block';
@@ -1007,77 +768,71 @@
     };
 
     // =======================================================
-    // MAIN
+    // INITIALIZATION CORE
     // =======================================================
-    function init() {
-        try {
-            Utils.safeAddEventListener(document, 'yt-navigate-start', () => { Utils.DOMCache.refresh(); });
-            Utils.safeAddEventListener(document, 'yt-page-data-updated', () => { Utils.DOMCache.refresh(); });
-
-            const config = ConfigManager.load();
-            
-            // CORREÇÃO: Envolver módulos complexos em blocos individuais
-            // para evitar que erros de compatibilidade matem a GUI
+    const EnhancerCore = {
+        init() {
             try {
-                if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init();
-            } catch (err) {
-                console.error('[YT Enhancer] Falha ao iniciar SmartCpuTamer:', err);
-            }
+                // Previne Memory Leaks no SPA limpando cache
+                Utils.safeAddEventListener(document, 'yt-navigate-start', () => Utils.DOMCache.refresh());
+                Utils.safeAddEventListener(document, 'yt-page-data-updated', () => Utils.DOMCache.refresh());
 
-            const openSettings = () => UIManager.openSettings((newConfig) => ConfigManager.save(newConfig));
-            
-            // CORREÇÃO: Tratamento de erro robusto no caso de Iframe Cross-Origin
-            let isTopFrame = false;
-            try {
-                isTopFrame = window.top === window.self;
-            } catch (e) {
-                isTopFrame = false; 
-            }
-            
-            // CORREÇÃO: Atualização de API de Menu do ViolentMonkey
-            if (isTopFrame && typeof GM_registerMenuCommand === 'function') {
-                GM_registerMenuCommand(t('menu.openSettings', config.LANGUAGE), async () => {
-                    openSettings();
-                }, { id: 'yt-enhancer-settings-cmd', autoClose: true });
-            }
+                const config = ConfigManager.load();
+                
+                // FIX: O Atalho agora roda no capture: true e força parada de outros eventos
+                Utils.safeAddEventListener(window, 'keydown', (event) => {
+                    if (event.altKey && event.shiftKey && (event.code === 'KeyS' || event.key.toLowerCase() === 's')) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        event.stopImmediatePropagation();
+                        UIManager.openSettings((newConfig) => ConfigManager.save(newConfig));
+                    }
+                }, { capture: true });
 
-            Utils.safeAddEventListener(document, 'keydown', (event) => {
-                if (event.altKey && event.shiftKey && event.code === 'KeyS') {
-                    event.preventDefault();
-                    openSettings();
-                }
-            });
-            
-            StyleManager.init();
-            ShortsManager.init(config);
-            ClockManager.init(config);
-            StyleManager.apply(config);
-            
-            EventBus.on('configChanged', (newConfig) => {
-                try {
-                    if (newConfig.FEATURES.CPU_TAMER && !SmartCpuTamer.initialized) SmartCpuTamer.init();
-                    else if (!newConfig.FEATURES.CPU_TAMER && SmartCpuTamer.initialized) SmartCpuTamer.cleanup();
-                } catch(e) {}
-            });
-            
-            log(`v${ConfigManager.CONFIG_VERSION} Carregado e Protegido`);
-            
-            Utils.safeAddEventListener(window, 'beforeunload', () => {
-                SmartCpuTamer.cleanup();
-                ClockManager.cleanup();
-                ShortsManager.cleanup();
-                Utils.DOMCache.refresh();
-            });
-            
-        } catch (error) {
-            console.error('Falha geral na inicialização do Enhancer:', error);
+                // Inicialização robusta e isolada de cada módulo
+                try { if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init(); } catch (e) { console.error('CPU Tamer Init Error:', e); }
+                try { StyleManager.init(); StyleManager.apply(config); } catch (e) { console.error('Style Manager Error:', e); }
+                try { ShortsManager.init(config); } catch (e) { console.error('Shorts Manager Error:', e); }
+                try { ClockManager.init(config); } catch (e) { console.error('Clock Manager Error:', e); }
+                
+                EventBus.on('configChanged', (newConfig) => {
+                    try {
+                        if (newConfig.FEATURES.CPU_TAMER && !SmartCpuTamer.initialized) SmartCpuTamer.init();
+                        else if (!newConfig.FEATURES.CPU_TAMER && SmartCpuTamer.initialized) SmartCpuTamer.cleanup();
+                    } catch(e) {}
+                });
+                
+                Utils.safeAddEventListener(window, 'beforeunload', () => {
+                    SmartCpuTamer.cleanup(); ClockManager.cleanup(); ShortsManager.cleanup(); Utils.DOMCache.refresh();
+                });
+
+                log(`v${ConfigManager.CONFIG_VERSION} Iniciado com sucesso.`);
+            } catch (error) {
+                console.error('[YT Enhancer] Falha Crítica de Inicialização:', error);
+            }
         }
-    }
+    };
 
-    if (document.readyState === 'loading') {
-        Utils.safeAddEventListener(document, 'DOMContentLoaded', init);
-    } else {
-        setTimeout(init, 100);
+    // =======================================================
+    // BOOTSTRAP (Fora do DOMContentLoaded)
+    // =======================================================
+    // Verifica se não estamos dentro de um iframe de anúncio
+    const isTopFrame = window === window.parent;
+
+    if (isTopFrame) {
+        // FIX: Registra o comando de Menu IMEDIATAMENTE antes do YouTube carregar
+        if (typeof GM_registerMenuCommand === 'function') {
+            const lang = ConfigManager.load().LANGUAGE;
+            GM_registerMenuCommand(t('menu.openSettings', lang), () => {
+                UIManager.openSettings((newConfig) => ConfigManager.save(newConfig));
+            }, { id: 'yt-enhancer-settings-cmd', autoClose: true });
+        }
+
+        if (document.readyState === 'loading') {
+            Utils.safeAddEventListener(document, 'DOMContentLoaded', () => EnhancerCore.init());
+        } else {
+            EnhancerCore.init();
+        }
     }
 
 })();
