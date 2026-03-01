@@ -354,11 +354,13 @@
             const appearanceGrid = create('div', { className: 'appearance-grid' });
             const createControl = (id, labelText, inputEl, valueEl = null) => {
                 const group = create('div', { className: 'control-group' });
-                group.append(create('label', { text: labelText }), inputEl);
+                group.append(create('label', { text: labelText }));
                 if (valueEl) {
                     const wrap = create('div', { className: 'color-input-wrapper' });
                     wrap.append(inputEl, valueEl);
-                    group.replaceChild(wrap, inputEl);
+                    group.append(wrap);
+                } else {
+                    group.append(inputEl);
                 }
                 inputEl.id = id;
                 return group;
