@@ -374,6 +374,29 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
         cleanupFunctions: [],
         styleId: 'yt-enhancer-modal-style',
 
+        ensureBodyReady(maxAttempts = 60, interval = 50) {
+            return new Promise((resolve) => {
+                let attempts = 0;
+
+                const check = () => {
+                    if (document.body) {
+                        resolve(true);
+                        return;
+                    }
+
+                    attempts += 1;
+                    if (attempts >= maxAttempts) {
+                        resolve(false);
+                        return;
+                    }
+
+                    setTimeout(check, interval);
+                };
+
+                check();
+            });
+        },
+
         ensureStyles() {
             if (document.getElementById(this.styleId)) return;
             if (!document.head) {
@@ -391,7 +414,7 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
                     border: 1px solid #333; border-radius: 12px;
                     box-shadow: 0 12px 24px rgba(0,0,0,0.5);
                     font-family: 'Roboto', Arial, sans-serif; font-size: 14px;
-                    display: flex; flex-direction: column; z-index: 10000;
+                    display: flex; flex-direction: column; z-index: 2147483647; isolation: isolate;
                 }
                 input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
                 input[type=number] { -moz-appearance: textfield; }
@@ -436,7 +459,13 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
             document.head.appendChild(style);
         },
 
-        createSettingsModal: function(currentConfig, onSave) {
+        createSettingsModal: async function(currentConfig, onSave) {
+            const bodyReady = await this.ensureBodyReady();
+            if (!bodyReady) {
+                console.error('[YT Enhancer] Não foi possível abrir Configurações: document.body indisponível.');
+                return false;
+            }
+
             this.ensureStyles();
             this.cleanupFunctions.forEach(fn => fn());
             this.cleanupFunctions = [];
@@ -463,7 +492,7 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
             };
 
             const overlay = create('div', { id: 'yt-enhancer-overlay' });
-            overlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 9998;';
+            overlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 2147483646; pointer-events: auto;';
 
             const modal = create('div', { id: 'yt-enhancer-settings-modal', className: 'yt-enhancer-modal' });
             const modalHeader = create('div', { className: 'modal-header' });
@@ -568,7 +597,17 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
             modalFooter.append(reloadNotice, modalActions);
 
             modal.append(modalHeader, tabsNav, modalContent, modalFooter);
-            document.body.append(overlay, modal);
+            const mountTarget = document.body || document.documentElement;
+            if (!mountTarget) {
+                console.error('[YT Enhancer] Não foi possível abrir Configurações: target de montagem indisponível.');
+                return false;
+            }
+            mountTarget.append(overlay, modal);
+
+            if (!overlay.isConnected || !modal.isConnected) {
+                document.documentElement?.appendChild(overlay);
+                document.documentElement?.appendChild(modal);
+            }
 
             const closeModal = () => {
                 modal.remove();
@@ -643,6 +682,8 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
                 closeModal();
                 setTimeout(() => window.location.reload(), 100);
             }));
+
+            return true;
         }
     };
 
@@ -1277,7 +1318,18 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
             if (isTopFrame) {
                 GM_registerMenuCommand(t('menu.openSettings', config.LANGUAGE), () => {
                     const currentConfig = ConfigManager.load();
-                    UIManager.createSettingsModal(currentConfig, (newConfig) => ConfigManager.save(newConfig));
+
+                    Promise.resolve(UIManager.createSettingsModal(currentConfig, (newConfig) => ConfigManager.save(newConfig)))
+                        .then((opened) => {
+                            if (!opened) {
+                                setTimeout(() => {
+                                    UIManager.createSettingsModal(currentConfig, (newConfig) => ConfigManager.save(newConfig));
+                                }, 200);
+                            }
+                        })
+                        .catch((error) => {
+                            console.error('[YT Enhancer] Erro ao abrir modal de configurações:', error);
+                        });
                 });
             }
             
