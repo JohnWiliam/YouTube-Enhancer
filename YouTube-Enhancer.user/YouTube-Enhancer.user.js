@@ -4,7 +4,7 @@
 // @version      2.1.0
 // @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts, elimina blur/translucidez e adiciona relógio customizável.
 // @author       John Wiliam & IA
-// @match        *://www.youtube.com/*
+// @match        *://*.youtube.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=youtube.com
 // @updateURL    https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js
 // @downloadURL  https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js
@@ -158,10 +158,10 @@
     };
 
     const ConfigManager = {
-        CONFIG_VERSION: '2.1.3',
+        CONFIG_VERSION: '2.1.0',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
-            version: '2.1.3', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
+            version: '2.1.0', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
             FEATURES: { CPU_TAMER: true, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true, RTX_VISUAL_MODE: true },
             CLOCK_STYLE: { color: '#ffffff', bgColor: '#191919', bgOpacity: 0.2, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
