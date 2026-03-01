@@ -823,9 +823,21 @@
         // FIX: Registra o comando de Menu IMEDIATAMENTE antes do YouTube carregar
         if (typeof GM_registerMenuCommand === 'function') {
             const lang = ConfigManager.load().LANGUAGE;
-            GM_registerMenuCommand(t('menu.openSettings', lang), () => {
+            const label = t('menu.openSettings', lang);
+            const callback = () => {
                 UIManager.openSettings((newConfig) => ConfigManager.save(newConfig));
-            }, { id: 'yt-enhancer-settings-cmd', autoClose: true });
+            };
+
+            try {
+                GM_registerMenuCommand(label, callback, { id: 'yt-enhancer-settings-cmd', autoClose: true });
+            } catch (error) {
+                console.warn('[YT Enhancer] Falha ao registrar menu com opções ({ id, autoClose }); tentando assinatura mínima.', error);
+                try {
+                    GM_registerMenuCommand(label, callback);
+                } catch (fallbackError) {
+                    console.warn('[YT Enhancer] Falha ao registrar menu na assinatura mínima.', fallbackError);
+                }
+            }
         }
 
         if (document.readyState === 'loading') {
