@@ -374,12 +374,12 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
         cleanupFunctions: [],
         styleId: 'yt-enhancer-modal-style',
 
-        ensureBodyReady(maxAttempts = 60, interval = 50) {
+        ensureRootReady(maxAttempts = 60, interval = 50) {
             return new Promise((resolve) => {
                 let attempts = 0;
 
                 const check = () => {
-                    if (document.body) {
+                    if (document.documentElement) {
                         resolve(true);
                         return;
                     }
@@ -395,6 +395,24 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
 
                 check();
             });
+        },
+
+        async openSettings(onSave, attempts = 3) {
+            const currentConfig = ConfigManager.load();
+
+            for (let attempt = 1; attempt <= attempts; attempt += 1) {
+                try {
+                    const opened = await this.createSettingsModal(currentConfig, onSave);
+                    if (opened) return true;
+                } catch (error) {
+                    console.error(`[YT Enhancer] Tentativa ${attempt} falhou ao abrir modal:`, error);
+                }
+
+                await new Promise((resolve) => setTimeout(resolve, 180 * attempt));
+            }
+
+            console.error('[YT Enhancer] Não foi possível abrir o modal de configurações após várias tentativas.');
+            return false;
         },
 
         ensureStyles() {
@@ -460,9 +478,9 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
         },
 
         createSettingsModal: async function(currentConfig, onSave) {
-            const bodyReady = await this.ensureBodyReady();
-            if (!bodyReady) {
-                console.error('[YT Enhancer] Não foi possível abrir Configurações: document.body indisponível.');
+            const rootReady = await this.ensureRootReady();
+            if (!rootReady) {
+                console.error('[YT Enhancer] Não foi possível abrir Configurações: documento indisponível.');
                 return false;
             }
 
@@ -1313,25 +1331,24 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
             // Configuração inicial para carregar os módulos
             const config = ConfigManager.load();
             if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init();
+
+            const openSettings = () => UIManager.openSettings((newConfig) => ConfigManager.save(newConfig));
             
             const isTopFrame = window.top === window.self;
-            if (isTopFrame) {
+            if (isTopFrame && typeof GM_registerMenuCommand === 'function') {
                 GM_registerMenuCommand(t('menu.openSettings', config.LANGUAGE), async () => {
-                    const currentConfig = ConfigManager.load();
-
-                    Promise.resolve(UIManager.createSettingsModal(currentConfig, (newConfig) => ConfigManager.save(newConfig)))
-                        .then((opened) => {
-                            if (!opened) {
-                                setTimeout(() => {
-                                    UIManager.createSettingsModal(currentConfig, (newConfig) => ConfigManager.save(newConfig));
-                                }, 200);
-                            }
-                        })
-                        .catch((error) => {
-                            console.error('[YT Enhancer] Erro ao abrir modal de configurações:', error);
-                        });
+                    openSettings();
                 });
+            } else if (isTopFrame) {
+                console.warn('[YT Enhancer] GM_registerMenuCommand indisponível. Atalho de teclado ativo: Alt+Shift+S.');
             }
+
+            Utils.safeAddEventListener(document, 'keydown', (event) => {
+                if (event.altKey && event.shiftKey && event.code === 'KeyS') {
+                    event.preventDefault();
+                    openSettings();
+                }
+            });
             
             StyleManager.init();
             ShortsManager.init(config);
