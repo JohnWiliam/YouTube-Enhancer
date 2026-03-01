@@ -182,6 +182,51 @@
         }
     };
 
+    const SettingsLauncher = {
+        menuRegistered: false,
+        opening: false,
+        open(source = 'unknown') {
+            if (this.opening) return;
+            this.opening = true;
+            Promise.resolve(UIManager.openSettings((newConfig) => ConfigManager.save(newConfig)))
+                .then((opened) => {
+                    if (!opened) console.warn(`[YT Enhancer] Falha ao abrir modal de configurações (source=${source}).`);
+                })
+                .catch((error) => {
+                    console.error(`[YT Enhancer] Exceção ao abrir configurações (source=${source}).`, error);
+                })
+                .finally(() => {
+                    this.opening = false;
+                });
+        },
+        registerMenuCommand() {
+            if (this.menuRegistered || typeof GM_registerMenuCommand !== 'function') return;
+            this.menuRegistered = true;
+
+            const lang = ConfigManager.load().LANGUAGE;
+            const label = t('menu.openSettings', lang);
+            const callback = () => this.open('menu');
+
+            try {
+                GM_registerMenuCommand(label, callback, { id: 'yt-enhancer-settings-cmd', autoClose: true });
+            } catch (error) {
+                console.warn('[YT Enhancer] Falha ao registrar menu com opções ({ id, autoClose }); tentando assinatura mínima.', error);
+                try {
+                    GM_registerMenuCommand(label, callback);
+                } catch (fallbackError) {
+                    console.warn('[YT Enhancer] Falha ao registrar menu na assinatura mínima.', fallbackError);
+                }
+            }
+        },
+        registerFallbackApi() {
+            try {
+                targetWindow.YT_ENHANCER_OPEN_SETTINGS = () => this.open('window_api');
+            } catch (error) {
+                console.warn('[YT Enhancer] Não foi possível expor API global de configurações.', error);
+            }
+        }
+    };
+
     // =======================================================
     // 2. UI MANAGER (Modal Blindado)
     // =======================================================
@@ -793,13 +838,15 @@
                 
                 // FIX: O Atalho agora roda no capture: true e força parada de outros eventos
                 Utils.safeAddEventListener(window, 'keydown', (event) => {
-                    if (event.altKey && event.shiftKey && (event.code === 'KeyS' || event.key.toLowerCase() === 's')) {
+                    if (event.altKey && event.shiftKey && (event.code === 'KeyS' || event.key?.toLowerCase() === 's')) {
                         event.preventDefault();
                         event.stopPropagation();
                         event.stopImmediatePropagation();
-                        UIManager.openSettings((newConfig) => ConfigManager.save(newConfig));
+                        SettingsLauncher.open('shortcut_alt_shift_s');
                     }
                 }, { capture: true });
+
+                SettingsLauncher.registerFallbackApi();
 
                 // Inicialização robusta e isolada de cada módulo
                 try { if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init(); } catch (e) { console.error('CPU Tamer Init Error:', e); }
@@ -883,29 +930,16 @@
     const bootstrapContext = BootstrapGate.evaluate();
 
     if (bootstrapContext.shouldInit) {
-        // FIX: Registra o comando de Menu IMEDIATAMENTE antes do YouTube carregar
-        if (typeof GM_registerMenuCommand === 'function') {
-            const lang = ConfigManager.load().LANGUAGE;
-            const label = t('menu.openSettings', lang);
-            const callback = () => {
-                UIManager.openSettings((newConfig) => ConfigManager.save(newConfig));
-            };
-
-            try {
-                GM_registerMenuCommand(label, callback, { id: 'yt-enhancer-settings-cmd', autoClose: true });
-            } catch (error) {
-                console.warn('[YT Enhancer] Falha ao registrar menu com opções ({ id, autoClose }); tentando assinatura mínima.', error);
-                try {
-                    GM_registerMenuCommand(label, callback);
-                } catch (fallbackError) {
-                    console.warn('[YT Enhancer] Falha ao registrar menu na assinatura mínima.', fallbackError);
-                }
-            }
-        }
+        // Registra cedo e reforça no init para cenários em que o menu do userscript não aparece de primeira no Firefox.
+        SettingsLauncher.registerMenuCommand();
 
         if (document.readyState === 'loading') {
-            Utils.safeAddEventListener(document, 'DOMContentLoaded', () => EnhancerCore.init());
+            Utils.safeAddEventListener(document, 'DOMContentLoaded', () => {
+                SettingsLauncher.registerMenuCommand();
+                EnhancerCore.init();
+            });
         } else {
+            SettingsLauncher.registerMenuCommand();
             EnhancerCore.init();
         }
     } else {
