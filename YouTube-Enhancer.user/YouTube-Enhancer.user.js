@@ -115,19 +115,23 @@
                 const old = document.getElementById(id);
                 if (old) old.remove();
 
+                let styleEl = null;
                 if (typeof GM_addStyle === 'function') {
-                    const styleEl = GM_addStyle(css);
-                    if (styleEl) styleEl.id = id;
+                    styleEl = GM_addStyle(css) || null;
+                    if (styleEl && id) styleEl.id = id;
                 } else if (typeof GM_addElement === 'function') {
-                    GM_addElement('style', { id: id, textContent: css });
+                    styleEl = GM_addElement('style', { id, textContent: css }) || null;
                 } else {
-                    const styleEl = document.createElement('style');
+                    styleEl = document.createElement('style');
                     styleEl.id = id;
                     styleEl.textContent = css;
                     (document.head || document.documentElement).appendChild(styleEl);
                 }
+
+                if (!styleEl && id) styleEl = document.getElementById(id);
+                return Boolean(styleEl && styleEl.isConnected);
             } catch (error) {
-                console.error(`[YT Enhancer] Falha ao injetar CSS (${id}):`, error);
+                return false;
             }
         }
     };
@@ -184,6 +188,13 @@
     const UIManager = {
         cleanupFunctions: [],
         styleId: 'yt-enhancer-modal-style',
+        styleFallbackLogCode: 'UI_MODAL_STYLE_FALLBACK',
+
+        applyModalInlineFallback(modalElement, reason = 'unknown') {
+            if (!modalElement) return;
+            modalElement.style.cssText = 'position: fixed !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) !important; background: #121212 !important; color: #f1f1f1 !important; z-index: 2147483647 !important;';
+            console.error(`[YT Enhancer][${this.styleFallbackLogCode}] CSS do modal indisponível; fallback inline aplicado (reason=${reason}).`);
+        },
 
         ensureRootReady(maxAttempts = 60, interval = 50) {
             return new Promise((resolve) => {
@@ -203,7 +214,7 @@
             const rootReady = await this.ensureRootReady();
             if (!rootReady) return false;
 
-            this.ensureStyles();
+            const stylesInjected = this.ensureStyles();
             this.cleanupFunctions.forEach(fn => fn());
             this.cleanupFunctions = [];
 
@@ -230,7 +241,8 @@
             overlay.style.cssText = 'position: fixed !important; inset: 0 !important; background: rgba(0,0,0,0.75) !important; z-index: 2147483646 !important; pointer-events: auto !important;';
 
             const modal = create('div', { id: 'yt-enhancer-settings-modal', className: 'yt-enhancer-modal' });
-            
+            if (!stylesInjected) this.applyModalInlineFallback(modal, 'injectCSS_failed');
+
             // Header
             const modalHeader = create('div', { className: 'modal-header' });
             modalHeader.append(
@@ -439,7 +451,7 @@
                 .btn-primary { background: #3ea6ff; color: #000; }
                 .btn-primary:hover { opacity: 0.9; }
             `;
-            Utils.injectCSS(css, this.styleId);
+            return Utils.injectCSS(css, this.styleId);
         }
     };
 
