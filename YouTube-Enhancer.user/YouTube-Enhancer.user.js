@@ -1316,7 +1316,7 @@ const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
             
             const isTopFrame = window.top === window.self;
             if (isTopFrame) {
-                GM_registerMenuCommand(t('menu.openSettings', config.LANGUAGE), () => {
+                GM_registerMenuCommand(t('menu.openSettings', config.LANGUAGE), async () => {
                     const currentConfig = ConfigManager.load();
 
                     Promise.resolve(UIManager.createSettingsModal(currentConfig, (newConfig) => ConfigManager.save(newConfig)))
