@@ -825,13 +825,64 @@
         }
     };
 
+    const Diagnostics = {
+        shortcutRegistered: false,
+        registerShortcut() {
+            if (this.shortcutRegistered) return;
+            this.shortcutRegistered = true;
+
+            Utils.safeAddEventListener(window, 'keydown', (event) => {
+                if (event.altKey && event.shiftKey && (event.code === 'KeyD' || event.key?.toLowerCase() === 'd')) {
+                    console.info('[YT Enhancer][diag] Contexto atual:', {
+                        href: location.href,
+                        hostname: location.hostname,
+                        readyState: document.readyState,
+                        visibilityState: document.visibilityState,
+                        isTopFrame: (() => {
+                            try { return window === window.top; } catch (_) { return 'unknown'; }
+                        })()
+                    });
+                }
+            }, { capture: true });
+        }
+    };
+
+    const BootstrapGate = {
+        evaluate() {
+            const hostnameAllowed = location.hostname === 'www.youtube.com';
+            const contextVisible = document.visibilityState !== 'hidden';
+
+            let isTopFrame = false;
+            let frameCheckStatus = 'ok';
+            try {
+                isTopFrame = window === window.top;
+            } catch (error) {
+                frameCheckStatus = 'unknown';
+                console.info('[YT Enhancer] Frame-check inconclusivo; fallback tolerante aplicado.', error);
+            }
+
+            const shouldInit = isTopFrame || (hostnameAllowed && contextVisible);
+
+            if (!shouldInit && frameCheckStatus === 'ok') {
+                const reason = !hostnameAllowed
+                    ? `hostname não permitido (${location.hostname})`
+                    : `contexto não visível (${document.visibilityState})`;
+                console.info(`[YT Enhancer] Bootstrap bloqueado por frame-check/contexto: ${reason}.`);
+            }
+
+            return { shouldInit, hostnameAllowed, contextVisible, isTopFrame, frameCheckStatus };
+        }
+    };
+
     // =======================================================
     // BOOTSTRAP (Fora do DOMContentLoaded)
     // =======================================================
-    // Verifica se não estamos dentro de um iframe de anúncio
-    const isTopFrame = window === window.parent;
+    // Sempre registra o atalho de diagnóstico, mesmo em contexto duvidoso.
+    Diagnostics.registerShortcut();
 
-    if (isTopFrame) {
+    const bootstrapContext = BootstrapGate.evaluate();
+
+    if (bootstrapContext.shouldInit) {
         // FIX: Registra o comando de Menu IMEDIATAMENTE antes do YouTube carregar
         if (typeof GM_registerMenuCommand === 'function') {
             const lang = ConfigManager.load().LANGUAGE;
@@ -857,6 +908,8 @@
         } else {
             EnhancerCore.init();
         }
+    } else {
+        console.info('[YT Enhancer] Inicialização principal ignorada; atalho de diagnóstico ativo (Alt+Shift+D).');
     }
 
 })();
