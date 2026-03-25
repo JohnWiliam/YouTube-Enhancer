@@ -2,7 +2,7 @@
 
 > **Optimize, Customize, and Take control of your YouTube experience.** > **Otimize, personalize e domine sua experiência no YouTube.**
 
-![Version](https://img.shields.io/badge/Version-2.1.0-blue)
+![Version](https://img.shields.io/badge/Version-2.1.1-blue)
 ![Language](https://img.shields.io/badge/Language-JavaScript-F7DF1E?logo=javascript&logoColor=F7DF1E)
 ![Author](https://img.shields.io/badge/Author-John%20Wiliam%20%26%20IA-orange)
 [![Install](https://img.shields.io/badge/Install-Click_Here-green)](https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js)
@@ -37,6 +37,7 @@ YouTube Enhancer is a powerful userscript for **Violentmonkey** that improves Yo
 5. **🧼 RTX Visual Mode (No Blur/Translucency)**
    - Removes blur/backdrop-filter effects from YouTube UI.
    - Replaces translucent backgrounds with transparency.
+   - *New in 2.1.1:* Keeps timeline hover preview thumbnails (including chapter previews) visible while RTX Mode is active.
 
 ### ⚙️ Settings Panel
 
@@ -90,6 +91,7 @@ O YouTube Enhancer é um userscript poderoso para **Violentmonkey** que melhora 
 5. **🧼 Modo RTX (Sem Blur/Translucidez)**
    - Remove efeitos de blur/backdrop-filter da interface do YouTube.
    - Substitui fundos translúcidos por transparência.
+   - *Novo na 2.1.1:* Mantém visível a miniatura de prévia da timeline (incluindo prévias de capítulos) quando o Modo RTX está ativo.
 
 ### ⚙️ Painel de Configurações
 
