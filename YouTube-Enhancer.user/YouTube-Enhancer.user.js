@@ -533,7 +533,7 @@
                     ytd-app :is([style*="rgba("], [style*="rgb("], [style*="background-color:"]) {
                         box-shadow: none !important;
                     }
-                    ytd-app [style*="background:"]:not(.ytp-tooltip-bg):not(.ytp-tooltip-image):not(.ytp-ce-video-preview):not([class*="chapter-hover"]) {
+                    ytd-app [style*="background:"]:not(.ytp-tooltip-bg):not(.ytp-tooltip-image):not(.ytp-ce-video-preview):not(.ytp-tooltip.ytp-preview):not([class*="chapter-hover"]) {
                         background-image: none !important;
                     }
                     ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-popup-container tp-yt-paper-dialog, ytd-multi-page-menu-renderer, tp-yt-iron-dropdown, .ytp-popup {
