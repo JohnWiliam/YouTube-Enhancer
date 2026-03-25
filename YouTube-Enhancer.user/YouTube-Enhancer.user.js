@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      2.1.0
+// @version      2.1.1
 // @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts, elimina blur/translucidez e adiciona relógio customizável.
 // @author       John Wiliam & IA
 // @match        *://*.youtube.com/*
@@ -20,7 +20,7 @@
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = '2.1.0';
+    const SCRIPT_VERSION = '2.1.1';
     const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
     if (window[FLAG]) return;
     window[FLAG] = true;
@@ -158,10 +158,10 @@
     };
 
     const ConfigManager = {
-        CONFIG_VERSION: '2.1.0',
+        CONFIG_VERSION: '2.1.1',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
-            version: '2.1.0', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
+            version: '2.1.1', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
             FEATURES: { CPU_TAMER: true, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true, RTX_VISUAL_MODE: true },
             CLOCK_STYLE: { color: '#ffffff', bgColor: '#191919', bgOpacity: 0.2, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
@@ -517,7 +517,44 @@
                 css += `ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]), ytd-guide-entry-renderer:has(a[href^="/shorts"]), ytd-guide-entry-renderer:has(a[href*="/shorts/"]), ytd-mini-guide-entry-renderer:has(a[href^="/shorts"]), ytd-mini-guide-entry-renderer:has(a[href*="/shorts/"]), ytd-guide-entry-renderer:has(a[title="Shorts"]), ytd-mini-guide-entry-renderer[aria-label="Shorts"] { display: none !important; }`;
             }
             if (config.FEATURES.RTX_VISUAL_MODE) {
-                css += `:root { --yt-spec-general-background-a: transparent !important; --yt-spec-general-background-b: transparent !important; --yt-spec-raised-background: transparent !important; --yt-spec-10-percent-layer: transparent !important; --yt-spec-badge-chip-background: transparent !important; --rtx-player-menu-background: rgba(15, 15, 15, 0.96) !important; } ytd-app *, tp-yt-iron-dropdown, tp-yt-paper-dialog, yt-confirm-dialog-renderer, ytd-popup-container, ytd-multi-page-menu-renderer, ytd-mini-guide-renderer, ytd-guide-renderer, ytd-searchbox, ytd-watch-flexy, ytd-live-chat-frame, .ytp-popup, .ytp-panel, .ytp-tooltip, .ytp-settings-menu, .ytp-menuitem, .iv-drawer, .sbdd_a, [style*="backdrop-filter"], [style*="-webkit-backdrop-filter"] { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; } ytd-app [style*="rgba("], ytd-app [style*="rgb("], ytd-app [style*="background:"], ytd-app [style*="background-color:"] { background-image: none !important; box-shadow: none !important; } ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-popup-container tp-yt-paper-dialog, ytd-multi-page-menu-renderer, tp-yt-iron-dropdown, .ytp-popup { background: transparent !important; background-color: transparent !important; } .ytp-settings-menu, .ytp-panel, .ytp-panel-menu, .ytp-popup.ytp-contextmenu { background: var(--rtx-player-menu-background) !important; background-color: var(--rtx-player-menu-background) !important; } ytd-popup-container tp-yt-paper-dialog, ytd-multi-page-menu-renderer, ytd-notification-topbar-button-renderer tp-yt-paper-dialog, ytd-account-menu { --yt-spec-general-background-a: var(--yt-spec-base-background) !important; --yt-spec-general-background-b: var(--yt-spec-base-background) !important; --yt-spec-raised-background: var(--yt-spec-base-background) !important; background: var(--yt-spec-base-background) !important; background-color: var(--yt-spec-base-background) !important; }`;
+                css += `
+                    :root {
+                        --yt-spec-general-background-a: transparent !important;
+                        --yt-spec-general-background-b: transparent !important;
+                        --yt-spec-raised-background: transparent !important;
+                        --yt-spec-10-percent-layer: transparent !important;
+                        --yt-spec-badge-chip-background: transparent !important;
+                        --rtx-player-menu-background: rgba(15, 15, 15, 0.96) !important;
+                    }
+                    ytd-app *, tp-yt-iron-dropdown, tp-yt-paper-dialog, yt-confirm-dialog-renderer, ytd-popup-container, ytd-multi-page-menu-renderer, ytd-mini-guide-renderer, ytd-guide-renderer, ytd-searchbox, ytd-watch-flexy, ytd-live-chat-frame, .ytp-popup, .ytp-panel, .ytp-tooltip, .ytp-settings-menu, .ytp-menuitem, .iv-drawer, .sbdd_a, [style*="backdrop-filter"], [style*="-webkit-backdrop-filter"] {
+                        backdrop-filter: none !important;
+                        -webkit-backdrop-filter: none !important;
+                    }
+                    ytd-app :is([style*="rgba("], [style*="rgb("], [style*="background-color:"]) {
+                        box-shadow: none !important;
+                    }
+                    ytd-app [style*="background:"]:not(.ytp-tooltip-bg):not(.ytp-tooltip-image):not(.ytp-ce-video-preview):not([class*="chapter-hover"]) {
+                        background-image: none !important;
+                    }
+                    ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-popup-container tp-yt-paper-dialog, ytd-multi-page-menu-renderer, tp-yt-iron-dropdown, .ytp-popup {
+                        background: transparent !important;
+                        background-color: transparent !important;
+                    }
+                    .ytp-settings-menu, .ytp-panel, .ytp-panel-menu, .ytp-popup.ytp-contextmenu {
+                        background: var(--rtx-player-menu-background) !important;
+                        background-color: var(--rtx-player-menu-background) !important;
+                    }
+                    .ytp-tooltip-bg, .ytp-tooltip-image, .ytp-ce-video-preview, .ytp-tooltip.ytp-preview {
+                        background-image: revert !important;
+                    }
+                    ytd-popup-container tp-yt-paper-dialog, ytd-multi-page-menu-renderer, ytd-notification-topbar-button-renderer tp-yt-paper-dialog, ytd-account-menu {
+                        --yt-spec-general-background-a: var(--yt-spec-base-background) !important;
+                        --yt-spec-general-background-b: var(--yt-spec-base-background) !important;
+                        --yt-spec-raised-background: var(--yt-spec-base-background) !important;
+                        background: var(--yt-spec-base-background) !important;
+                        background-color: var(--yt-spec-base-background) !important;
+                    }
+                `;
             }
             Utils.injectCSS(css, this.styleId);
         }
