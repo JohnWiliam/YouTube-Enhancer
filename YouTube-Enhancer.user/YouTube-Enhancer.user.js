@@ -20,6 +20,7 @@
 (function() {
     'use strict';
 
+    // Atualizada versão para 2.1.1 para refletir o hotfix do storyboard
     const SCRIPT_VERSION = '2.1.1';
     const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
     if (window[FLAG]) return;
@@ -145,7 +146,7 @@
             menu: { openSettings: '⚙️ Configurações' }
         },
         en: {
-            modal: { title: '⚙️ Settings', closeTitle: 'Close', tabs: { features: '🔧 Features', appearance: '🎨 Clock appearance' }, features: { cpuTamer: { title: 'Smart CPU Reduction', description: 'Optimizes when hidden (saves battery)' }, layout: { title: 'Grid Layout', description: 'Adjusts videos per row' }, videosPerRow: 'Videos per row', videosPerRowHint: 'Defines videos in each row', shorts: { title: 'Remove Shorts', description: 'Cleans Shorts from UI' }, clock: { title: 'Floating Clock', description: 'Shows time over the video' }, rtx: { title: 'RTX Mode (no blur)', description: 'Turns translucent backgrounds transparent' }, language: { title: 'Interface Language', description: 'Switch texts between EN and PT' } }, clockStyle: { textColor: 'Text Color', backgroundColor: 'Background Color', backgroundOpacity: 'Background Opacity', fontSize: 'Font Size (px)', margin: 'Margin (px)', borderRadius: 'Roundness (px)' }, buttons: { apply: 'Apply', applyAndReload: 'Apply and Reload' }, reloadNotice: 'Language and CPU require reloading.' },
+            modal: { title: '⚙️ Settings', closeTitle: 'Close', tabs: { features: '🔧 Features', appearance: '🎨 Clock appearance' }, features: { cpuTamer: { title: 'Smart CPU Reduction', description: 'Optimizes when hidden (saves battery)' }, layout: { title: 'Grid Layout', description: 'Adjusts videos per row' }, videosPerRow: 'Videos per row', videosPerRowHint: 'Defines videos in each row', shorts: { title: 'Remove Shorts', description: 'Cleans Shorts from UI' }, clock: { title: 'Floating Clock', description: 'Shows time over the video' }, rtx: { title: 'RTX Mode (no blur)', description: 'Turns translucent backgrounds transparent' }, language: { title: 'Interface Language', description: 'Switch texts between EN and PT' } }, clockStyle: { textColor: 'Text Color', backgroundColor: 'Background Color', BackgroundOpacity: 'Background Opacity', fontSize: 'Font Size (px)', margin: 'Margin (px)', borderRadius: 'Roundness (px)' }, buttons: { apply: 'Apply', applyAndReload: 'Apply and Reload' }, reloadNotice: 'Language and CPU require reloading.' },
             menu: { openSettings: '⚙️ Settings' }
         }
     };
@@ -533,7 +534,9 @@
                     ytd-app :is([style*="rgba("], [style*="rgb("], [style*="background-color:"]) {
                         box-shadow: none !important;
                     }
-                    ytd-app [style*="background:"]:not(.ytp-tooltip-bg):not(.ytp-tooltip-image):not(.ytp-ce-video-preview):not(.ytp-tooltip.ytp-preview):not([class*="chapter-hover"]) {
+                    
+                    /* CORREÇÃO DO STORYBOARD: Adicionado :not([class*="ytp-storyboard"]) para impedir o bloqueio das miniaturas de pré-visualização. */
+                    ytd-app [style*="background:"]:not(.ytp-tooltip-bg):not(.ytp-tooltip-image):not(.ytp-ce-video-preview):not(.ytp-tooltip.ytp-preview):not([class*="chapter-hover"]):not([class*="ytp-storyboard"]) {
                         background-image: none !important;
                     }
                     ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-popup-container tp-yt-paper-dialog, ytd-multi-page-menu-renderer, tp-yt-iron-dropdown, .ytp-popup {
@@ -544,9 +547,12 @@
                         background: var(--rtx-player-menu-background) !important;
                         background-color: var(--rtx-player-menu-background) !important;
                     }
-                    .ytp-tooltip-bg, .ytp-tooltip-image, .ytp-ce-video-preview, .ytp-tooltip.ytp-preview {
+                    
+                    /* CORREÇÃO DO STORYBOARD: Inclusão de [class*="ytp-storyboard"] na lista de exceções para forçar o revert do background-image */
+                    .ytp-tooltip-bg, .ytp-tooltip-image, .ytp-ce-video-preview, .ytp-tooltip.ytp-preview, [class*="ytp-storyboard"] {
                         background-image: revert !important;
                     }
+                    
                     ytd-popup-container tp-yt-paper-dialog, ytd-multi-page-menu-renderer, ytd-notification-topbar-button-renderer tp-yt-paper-dialog, ytd-account-menu {
                         --yt-spec-general-background-a: var(--yt-spec-base-background) !important;
                         --yt-spec-general-background-b: var(--yt-spec-base-background) !important;
