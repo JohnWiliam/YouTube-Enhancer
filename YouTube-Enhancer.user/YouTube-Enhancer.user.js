@@ -20,7 +20,6 @@
 (function() {
     'use strict';
 
-    // Atualizada versão para 2.1.1 para refletir o hotfix do storyboard
     const SCRIPT_VERSION = '2.1.1';
     const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
     if (window[FLAG]) return;
@@ -519,47 +518,42 @@
             }
             if (config.FEATURES.RTX_VISUAL_MODE) {
                 css += `
-                    :root {
-                        --yt-spec-general-background-a: transparent !important;
-                        --yt-spec-general-background-b: transparent !important;
-                        --yt-spec-raised-background: transparent !important;
-                        --yt-spec-10-percent-layer: transparent !important;
-                        --yt-spec-badge-chip-background: transparent !important;
-                        --rtx-player-menu-background: rgba(15, 15, 15, 0.96) !important;
-                    }
-                    ytd-app *, tp-yt-iron-dropdown, tp-yt-paper-dialog, yt-confirm-dialog-renderer, ytd-popup-container, ytd-multi-page-menu-renderer, ytd-mini-guide-renderer, ytd-guide-renderer, ytd-searchbox, ytd-watch-flexy, ytd-live-chat-frame, .ytp-popup, .ytp-panel, .ytp-tooltip, .ytp-settings-menu, .ytp-menuitem, .iv-drawer, .sbdd_a, [style*="backdrop-filter"], [style*="-webkit-backdrop-filter"] {
+                    /* 1. Remoção global e segura de Blur (backdrop-filter) */
+                    *, :before, :after {
                         backdrop-filter: none !important;
                         -webkit-backdrop-filter: none !important;
                     }
-                    ytd-app :is([style*="rgba("], [style*="rgb("], [style*="background-color:"]) {
-                        box-shadow: none !important;
-                    }
-                    
-                    /* CORREÇÃO DO STORYBOARD: Adicionado :not([class*="ytp-storyboard"]) para impedir o bloqueio das miniaturas de pré-visualização. */
-                    ytd-app [style*="background:"]:not(.ytp-tooltip-bg):not(.ytp-tooltip-image):not(.ytp-ce-video-preview):not(.ytp-tooltip.ytp-preview):not([class*="chapter-hover"]):not([class*="ytp-storyboard"]) {
-                        background-image: none !important;
-                    }
-                    ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-popup-container tp-yt-paper-dialog, ytd-multi-page-menu-renderer, tp-yt-iron-dropdown, .ytp-popup {
+
+                    /* 2. Tornar o cabeçalho e barras laterais transparentes, removendo as variáveis de background dinâmico */
+                    ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-guide-renderer {
                         background: transparent !important;
                         background-color: transparent !important;
                     }
-                    .ytp-settings-menu, .ytp-panel, .ytp-panel-menu, .ytp-popup.ytp-contextmenu {
-                        background: var(--rtx-player-menu-background) !important;
-                        background-color: var(--rtx-player-menu-background) !important;
+
+                    /* 3. Menus dropdown, popups de conta e janelas modais do YouTube */
+                    /* Usamos a variável nativa de tema do YT para garantir contraste sem blur */
+                    tp-yt-paper-dialog,
+                    ytd-multi-page-menu-renderer,
+                    tp-yt-iron-dropdown,
+                    ytd-popup-container tp-yt-paper-dialog,
+                    ytd-account-menu {
+                        background: var(--yt-spec-base-background, #0f0f0f) !important;
+                        background-color: var(--yt-spec-base-background, #0f0f0f) !important;
                     }
-                    
-                    /* CORREÇÃO DO STORYBOARD: Inclusão de [class*="ytp-storyboard"] na lista de exceções para forçar o revert do background-image */
-                    .ytp-tooltip-bg, .ytp-tooltip-image, .ytp-ce-video-preview, .ytp-tooltip.ytp-preview, [class*="ytp-storyboard"] {
-                        background-image: revert !important;
+
+                    /* 4. Menus internos do Player de Vídeo (Engrenagem, Qualidade, Legendas) */
+                    /* O player é sempre escuro, então fixamos um fundo quase sólido escuro para leitura perfeita */
+                    .ytp-settings-menu,
+                    .ytp-panel,
+                    .ytp-panel-menu,
+                    .ytp-popup.ytp-contextmenu {
+                        background: rgba(15, 15, 15, 0.95) !important;
+                        background-color: rgba(15, 15, 15, 0.95) !important;
+                        text-shadow: none !important;
                     }
-                    
-                    ytd-popup-container tp-yt-paper-dialog, ytd-multi-page-menu-renderer, ytd-notification-topbar-button-renderer tp-yt-paper-dialog, ytd-account-menu {
-                        --yt-spec-general-background-a: var(--yt-spec-base-background) !important;
-                        --yt-spec-general-background-b: var(--yt-spec-base-background) !important;
-                        --yt-spec-raised-background: var(--yt-spec-base-background) !important;
-                        background: var(--yt-spec-base-background) !important;
-                        background-color: var(--yt-spec-base-background) !important;
-                    }
+
+                    /* Nota: Qualquer regra sobre "background-image: none" foi removida completamente. 
+                       Isso garante que previews, storyboards e sprites nativos do YouTube funcionem 100%. */
                 `;
             }
             Utils.injectCSS(css, this.styleId);
