@@ -161,9 +161,9 @@
         CONFIG_VERSION: '2.1.1',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
-            version: '2.1.1', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
+            version: '2.1.1', LANGUAGE: 'pt', VIDEOS_PER_ROW: 4,
             FEATURES: { CPU_TAMER: true, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true, RTX_VISUAL_MODE: true },
-            CLOCK_STYLE: { color: '#ffffff', bgColor: '#191919', bgOpacity: 0.2, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
+            CLOCK_STYLE: { color: '#ffffff', bgColor: '#191919', bgOpacity: 0.3, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
         load() {
             try {
