@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Tampermonkey Scripts
-// @version      v2.2.0 - Edge
-// @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts, adiciona relógio e gerencia Layout em Abas (Tabview).
+// @version      v2.3.0 - Edge
+// @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts e adiciona relógio flutuante para YouTube no Edge/Tampermonkey.
 // @author       John Wiliam & IA
-// @match        *://*.youtube.com/*
+// @match        *://www.youtube.com/*
+// @noframes
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=youtube.com
 // @updateURL    https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js
 // @downloadURL  https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js
@@ -12,7 +13,6 @@
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
 // @grant        GM_addStyle
-// @grant        GM_addElement
 // @grant        unsafeWindow
 // @run-at       document-start
 // ==/UserScript==
@@ -20,7 +20,7 @@
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = 'v2.2.0 - Edge';
+    const SCRIPT_VERSION = 'v2.3.0 - Edge';
     const FLAG = `__yt_enhancer_${SCRIPT_VERSION.replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '')}__`;
     if (window[FLAG]) return;
     window[FLAG] = true;
@@ -88,6 +88,16 @@
             debounced.cancel = () => clearTimeout(timeout);
             return debounced;
         },
+        scheduleIdle(callback, timeout = 1000) {
+            const scheduler = targetWindow.requestIdleCallback || window.requestIdleCallback;
+            if (typeof scheduler === 'function') return scheduler.call(targetWindow, callback, { timeout });
+            return setTimeout(() => callback({ didTimeout: true, timeRemaining: () => 0 }), Math.min(timeout, 250));
+        },
+        cancelIdle(handle) {
+            const cancel = targetWindow.cancelIdleCallback || window.cancelIdleCallback;
+            if (typeof cancel === 'function') cancel.call(targetWindow, handle);
+            else clearTimeout(handle);
+        },
         DOMCache: {
             cache: new Map(),
             get(selector, force = false) {
@@ -119,11 +129,11 @@
                 savedConfig.version = '1.0.0';
                 if (!savedConfig.CLOCK_STYLE?.borderRadius) savedConfig.CLOCK_STYLE = { ...savedConfig.CLOCK_STYLE, borderRadius: 12 };
             }
-            if (savedConfig.FEATURES && typeof savedConfig.FEATURES.TABVIEW_LAYOUT === 'undefined') {
-                savedConfig.FEATURES.TABVIEW_LAYOUT = false;
-            }
             savedConfig.version = currentVersion;
             return savedConfig;
+        },
+        removeInjectedCSS(id) {
+            document.getElementById(id)?.remove();
         },
         injectCSS(css, id) {
             try {
@@ -134,8 +144,6 @@
                 if (typeof GM_addStyle === 'function') {
                     styleEl = GM_addStyle(css) || null;
                     if (styleEl && id) styleEl.id = id;
-                } else if (typeof GM_addElement === 'function') {
-                    styleEl = GM_addElement('style', { id, textContent: css }) || null;
                 } else {
                     styleEl = document.createElement('style');
                     styleEl.id = id;
@@ -156,11 +164,11 @@
     // =======================================================
     const I18N = {
         pt: {
-            modal: { title: '⚙️ Configurações', closeTitle: 'Fechar', tabs: { features: '🔧 Funcionalidades', appearance: '🎨 Aparência do relógio' }, features: { cpuTamer: { title: 'Redução Inteligente de CPU', description: 'Otimiza quando oculto (economiza bateria)' }, layout: { title: 'Layout Grid', description: 'Ajusta vídeos por linha' }, videosPerRow: 'Vídeos por linha', videosPerRowHint: 'Define quantos vídeos aparecem', shorts: { title: 'Remover Shorts', description: 'Limpa Shorts da interface' }, clock: { title: 'Relógio Flutuante', description: 'Mostra hora sobre o vídeo' }, tabview: { title: 'Layout em Abas (Tabview)', description: 'Organiza vídeos, descrição e comentários em abas laterais' }, language: { title: 'Idioma da Interface', description: 'Troca textos entre PT e EN' } }, clockStyle: { textColor: 'Cor do Texto', backgroundColor: 'Cor do Fundo', backgroundOpacity: 'Opacidade Fundo', fontSize: 'Tamanho Fonte (px)', margin: 'Margem (px)', borderRadius: 'Arredondamento (px)' }, buttons: { apply: 'Aplicar', applyAndReload: 'Aplicar e Recarregar' }, reloadNotice: 'Aba lateral, Idioma e CPU exigem recarregar a página.' },
+            modal: { title: '⚙️ Configurações', closeTitle: 'Fechar', tabs: { features: '🔧 Funcionalidades', appearance: '🎨 Aparência do relógio' }, features: { cpuTamer: { title: 'Redução Inteligente de CPU', description: 'Otimiza quando oculto (economiza bateria)' }, layout: { title: 'Layout Grid', description: 'Ajusta vídeos por linha' }, videosPerRow: 'Vídeos por linha', videosPerRowHint: 'Define quantos vídeos aparecem', shorts: { title: 'Remover Shorts', description: 'Limpa Shorts da interface' }, clock: { title: 'Relógio Flutuante', description: 'Mostra hora sobre o vídeo' }, language: { title: 'Idioma da Interface', description: 'Troca textos entre PT e EN' } }, clockStyle: { textColor: 'Cor do Texto', backgroundColor: 'Cor do Fundo', backgroundOpacity: 'Opacidade Fundo', fontSize: 'Tamanho Fonte (px)', margin: 'Margem (px)', borderRadius: 'Arredondamento (px)' }, buttons: { apply: 'Aplicar', applyAndReload: 'Aplicar e Recarregar' }, reloadNotice: 'Idioma e CPU exigem recarregar a página.' },
             menu: { openSettings: '⚙️ Configurações' }
         },
         en: {
-            modal: { title: '⚙️ Settings', closeTitle: 'Close', tabs: { features: '🔧 Features', appearance: '🎨 Clock appearance' }, features: { cpuTamer: { title: 'Smart CPU Reduction', description: 'Optimizes when hidden (saves battery)' }, layout: { title: 'Grid Layout', description: 'Adjusts videos per row' }, videosPerRow: 'Videos per row', videosPerRowHint: 'Defines videos in each row', shorts: { title: 'Remove Shorts', description: 'Cleans Shorts from UI' }, clock: { title: 'Floating Clock', description: 'Shows time over the video' }, tabview: { title: 'Tabbed Layout (Tabview)', description: 'Rearranges videos, info, and comments into side tabs' }, language: { title: 'Interface Language', description: 'Switch texts between EN and PT' } }, clockStyle: { textColor: 'Text Color', backgroundColor: 'Background Color', backgroundOpacity: 'Background Opacity', fontSize: 'Font Size (px)', margin: 'Margin (px)', borderRadius: 'Roundness (px)' }, buttons: { apply: 'Apply', applyAndReload: 'Apply and Reload' }, reloadNotice: 'Tabview, Language and CPU require reloading.' },
+            modal: { title: '⚙️ Settings', closeTitle: 'Close', tabs: { features: '🔧 Features', appearance: '🎨 Clock appearance' }, features: { cpuTamer: { title: 'Smart CPU Reduction', description: 'Optimizes when hidden (saves battery)' }, layout: { title: 'Grid Layout', description: 'Adjusts videos per row' }, videosPerRow: 'Videos per row', videosPerRowHint: 'Defines videos in each row', shorts: { title: 'Remove Shorts', description: 'Cleans Shorts from UI' }, clock: { title: 'Floating Clock', description: 'Shows time over the video' }, language: { title: 'Interface Language', description: 'Switch texts between EN and PT' } }, clockStyle: { textColor: 'Text Color', backgroundColor: 'Background Color', backgroundOpacity: 'Background Opacity', fontSize: 'Font Size (px)', margin: 'Margin (px)', borderRadius: 'Roundness (px)' }, buttons: { apply: 'Apply', applyAndReload: 'Apply and Reload' }, reloadNotice: 'Language and CPU require reloading.' },
             menu: { openSettings: '⚙️ Settings' }
         }
     };
@@ -177,7 +185,7 @@
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
             version: SCRIPT_VERSION, LANGUAGE: 'pt', VIDEOS_PER_ROW: 4,
-            FEATURES: { CPU_TAMER: true, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true, TABVIEW_LAYOUT: false },
+            FEATURES: { CPU_TAMER: true, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true },
             CLOCK_STYLE: { color: '#ffffff', bgColor: '#191919', bgOpacity: 0.3, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
         readStorage() {
@@ -353,7 +361,6 @@
             optionsList.append(layoutSettings);
 
             optionsList.append(
-                createToggle('cfg-tabview', t('modal.features.tabview.title', config.LANGUAGE), t('modal.features.tabview.description', config.LANGUAGE), config.FEATURES.TABVIEW_LAYOUT),
                 createToggle('cfg-shorts', t('modal.features.shorts.title', config.LANGUAGE), t('modal.features.shorts.description', config.LANGUAGE), config.FEATURES.SHORTS_REMOVAL),
                 createToggle('cfg-clock-enable', t('modal.features.clock.title', config.LANGUAGE), t('modal.features.clock.description', config.LANGUAGE), config.FEATURES.FULLSCREEN_CLOCK)
             );
@@ -443,8 +450,7 @@
                     CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
                     LAYOUT_ENHANCEMENT: document.getElementById('cfg-layout').checked,
                     SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked,
-                    FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked,
-                    TABVIEW_LAYOUT: document.getElementById('cfg-tabview').checked
+                    FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked
                 },
                 CLOCK_STYLE: {
                     color: document.getElementById('style-color').value,
@@ -460,8 +466,7 @@
             const updateSaveButtons = () => {
                 const newConfig = getNewConfig();
                 const requiresReload = newConfig.FEATURES.CPU_TAMER !== config.FEATURES.CPU_TAMER || 
-                                       newConfig.LANGUAGE !== config.LANGUAGE ||
-                                       newConfig.FEATURES.TABVIEW_LAYOUT !== config.FEATURES.TABVIEW_LAYOUT;
+                                       newConfig.LANGUAGE !== config.LANGUAGE;
                 btnApply.style.display = requiresReload ? 'none' : 'block';
                 btnReload.style.display = requiresReload ? 'block' : 'none';
                 reloadNotice.style.display = requiresReload ? 'block' : 'none';
@@ -469,7 +474,6 @@
 
             this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-cpu-tamer'), 'change', updateSaveButtons));
             this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-language'), 'change', updateSaveButtons));
-            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-tabview'), 'change', updateSaveButtons));
             this.cleanupFunctions.push(Utils.safeAddEventListener(btnApply, 'click', () => { onSave(getNewConfig()); closeModal(); }));
             this.cleanupFunctions.push(Utils.safeAddEventListener(btnReload, 'click', () => { onSave(getNewConfig()); closeModal(); setTimeout(() => window.location.reload(), 100); }));
 
@@ -537,7 +541,8 @@
             if (config.FEATURES.SHORTS_REMOVAL) {
                 css += `ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]), ytd-guide-entry-renderer:has(a[href^="/shorts"]), ytd-guide-entry-renderer:has(a[href*="/shorts/"]), ytd-mini-guide-entry-renderer:has(a[href^="/shorts"]), ytd-mini-guide-entry-renderer:has(a[href*="/shorts/"]), ytd-guide-entry-renderer:has(a[title="Shorts"]), ytd-mini-guide-entry-renderer[aria-label="Shorts"] { display: none !important; }`;
             }
-            Utils.injectCSS(css, this.styleId);
+            if (css) Utils.injectCSS(css, this.styleId);
+            else Utils.removeInjectedCSS(this.styleId);
         }
     };
 
@@ -545,9 +550,21 @@
     // SHORTS MANAGER
     // =======================================================
     const ShortsManager = {
-        observer: null, listenersCleanup: [], hiddenElements: new Set(), enabled: false,
-        debouncedPrune: Utils.debounce(function() { if (this.enabled) this.prune(); }, 150),
-        init(config) { this.updateConfig(config); EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig)); },
+        observer: null,
+        listenersCleanup: [],
+        hiddenElements: new Set(),
+        pendingRoots: new Set(),
+        idleHandle: null,
+        enabled: false,
+        selectors: {
+            direct: 'ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts], ytd-reel-item-renderer, ytd-rich-item-renderer:has(a[href^="/shorts/"])',
+            overlays: 'ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]',
+            links: 'a[href^="/shorts"], a[href*="/shorts/"], a[title="Shorts"], [aria-label="Shorts"]'
+        },
+        init(config) {
+            this.updateConfig(config);
+            EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
+        },
         updateConfig(config) {
             const shouldEnable = Boolean(config?.FEATURES?.SHORTS_REMOVAL);
             if (shouldEnable === this.enabled) return;
@@ -556,19 +573,62 @@
         },
         start() {
             if (!document.documentElement) return;
-            this.prune();
+            this.schedulePrune(document);
             if (!this.observer) {
-                this.observer = new MutationObserver(() => this.debouncedPrune());
+                this.observer = new MutationObserver((mutations) => {
+                    for (const mutation of mutations) {
+                        mutation.addedNodes.forEach((node) => {
+                            if (node.nodeType === Node.ELEMENT_NODE) this.pendingRoots.add(node);
+                        });
+                    }
+                    this.flushPendingPrune();
+                });
                 this.observer.observe(document.documentElement, { childList: true, subtree: true });
             }
             if (this.listenersCleanup.length === 0) {
-                this.listenersCleanup.push(Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()), Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()), Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune()));
+                const fullRefresh = () => this.schedulePrune(document);
+                this.listenersCleanup.push(
+                    Utils.safeAddEventListener(document, 'yt-navigate-finish', fullRefresh),
+                    Utils.safeAddEventListener(document, 'yt-page-data-updated', fullRefresh),
+                    Utils.safeAddEventListener(window, 'popstate', fullRefresh)
+                );
             }
         },
         stop() {
             if (this.observer) { this.observer.disconnect(); this.observer = null; }
+            if (this.idleHandle) { Utils.cancelIdle(this.idleHandle); this.idleHandle = null; }
+            this.pendingRoots.clear();
             this.listenersCleanup.forEach((cleanup) => cleanup()); this.listenersCleanup = [];
             this.restoreHiddenElements();
+        },
+        schedulePrune(root) {
+            if (root) this.pendingRoots.add(root);
+            this.flushPendingPrune();
+        },
+        flushPendingPrune() {
+            if (!this.enabled || this.idleHandle) return;
+            this.idleHandle = Utils.scheduleIdle(() => {
+                this.idleHandle = null;
+                if (!this.enabled) return;
+                const roots = this.pendingRoots.size ? [...this.pendingRoots] : [document];
+                this.pendingRoots.clear();
+                roots.forEach((root) => this.prune(root));
+            }, 750);
+        },
+        collect(root, selector, callback) {
+            if (!root) return;
+            try {
+                const candidates = [];
+                if (root.nodeType === Node.DOCUMENT_NODE || root.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+                    candidates.push(...root.querySelectorAll(selector));
+                } else if (root.nodeType === Node.ELEMENT_NODE) {
+                    if (root.matches?.(selector)) candidates.push(root);
+                    candidates.push(...root.querySelectorAll(selector));
+                }
+                candidates.forEach(callback);
+            } catch (error) {
+                console.warn('[YT Enhancer] Falha ao processar seletor de Shorts:', selector, error);
+            }
         },
         markHidden(element) {
             if (!(element instanceof HTMLElement) || this.hiddenElements.has(element)) return;
@@ -585,13 +645,22 @@
             }
             this.hiddenElements.clear();
         },
-        prune() {
+        prune(root = document) {
             const hide = new Set();
-            document.querySelectorAll('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach(n => { hide.add(n); const s = n.closest('ytd-rich-section-renderer'); if(s) hide.add(s); });
-            document.querySelectorAll('ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach(m => { const c = m.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-item-section-renderer'); if(c) hide.add(c); });
-            document.querySelectorAll('a[href^="/shorts"], a[href*="/shorts/"], a[title="Shorts"], [aria-label="Shorts"]').forEach(l => { const e = l.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item'); if(e) hide.add(e); });
-            document.querySelectorAll('ytd-reel-item-renderer, ytd-rich-item-renderer:has(a[href^="/shorts/"])').forEach(i => hide.add(i));
-            hide.forEach(el => this.markHidden(el));
+            this.collect(root, this.selectors.direct, (node) => {
+                hide.add(node);
+                const section = node.closest?.('ytd-rich-section-renderer');
+                if (section) hide.add(section);
+            });
+            this.collect(root, this.selectors.overlays, (marker) => {
+                const container = marker.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-item-section-renderer');
+                if (container) hide.add(container);
+            });
+            this.collect(root, this.selectors.links, (link) => {
+                const entry = link.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item');
+                if (entry) hide.add(entry);
+            });
+            hide.forEach((element) => this.markHidden(element));
         },
         cleanup() { this.stop(); }
     };
@@ -844,195 +913,6 @@
     };
 
     // =======================================================
-    // 6. TABVIEW MANAGER (Extração otimizada)
-    // =======================================================
-    const TabviewManager = {
-        initialized: false,
-        init(config) {
-            if (config.FEATURES.TABVIEW_LAYOUT && !this.initialized) {
-                this.injectTabview();
-                this.initialized = true;
-            }
-        },
-        injectTabview() {
-            log('Iniciando Layout em Abas (Tabview) com suporte PT e EN...');
-            const VAL_ROUNDED_A1 = 12;
-            const css = `@keyframes relatedElementProvided{0%{background-position-x:3px}to{background-position-x:4px}}html[tabview-loaded=icp] #related.ytd-watch-flexy{animation:relatedElementProvided 1ms linear 0s 1 normal forwards}html[tabview-loaded=icp] #right-tabs #related.ytd-watch-flexy,html[tabview-loaded=icp] #right-tabs ytd-expander#expander,html[tabview-loaded=icp] [hidden] #related.ytd-watch-flexy,html[tabview-loaded=icp] [hidden] ytd-expander#expander,html[tabview-loaded=icp] ytd-comments ytd-expander#expander{animation:initial}#secondary.ytd-watch-flexy{position:relative}#secondary-inner.style-scope.ytd-watch-flexy{height:100%}ytd-watch-flexy #secondary{--tyt-secondary-mt:var(--ytd-margin-6x);--tyt-secondary-mb:var(--ytd-margin-6x);--tyt-secondary-mr:var(--ytd-margin-6x)}ytd-watch-flexy[reduced-top-margin] #secondary{--tyt-secondary-mt:var(--ytd-margin-3x);--tyt-secondary-mb:var(--ytd-margin-3x)}secondary-wrapper{border:0;box-sizing:border-box;contain:size style;flex-wrap:nowrap;height:100%;left:0;max-height:calc(100vh - var(--ytd-toolbar-height, 56px));padding:0;padding-bottom:var(--tyt-secondary-mb);padding-right:var(--tyt-secondary-mr);padding-top:var(--tyt-secondary-mt);position:absolute;right:0;top:0}#right-tabs,secondary-wrapper{display:flex;flex-direction:column;margin:0}#right-tabs{flex-grow:1;padding:0;position:relative}[tyt-tab=""] #right-tabs{flex-grow:0}[tyt-tab=""] #right-tabs .tab-content{border:0}#right-tabs .tab-content{flex-grow:1}ytd-watch-flexy[hide-default-text-inline-expander] #primary.style-scope.ytd-watch-flexy ytd-text-inline-expander{display:none}ytd-watch-flexy:not([keep-comments-scroller]) #tab-comments.tab-content-hidden{--comment-pre-load-sizing:90px;border:0;contain:strict;display:block!important;height:var(--comment-pre-load-sizing)!important;left:2px;margin:0;overflow:hidden;padding:0;pointer-events:none!important;position:fixed!important;top:2px;visibility:collapse;width:var(--comment-pre-load-sizing)!important;z-index:-1}ytd-watch-flexy:not([keep-comments-scroller]) #tab-comments.tab-content-hidden ytd-comments#comments>ytd-item-section-renderer#sections{border:0;contain:strict;display:block!important;height:var(--comment-pre-load-sizing);margin:0;overflow:hidden;padding:0;width:var(--comment-pre-load-sizing)}ytd-watch-flexy:not([keep-comments-scroller]) #tab-comments.tab-content-hidden ytd-comments#comments>ytd-item-section-renderer#sections>#contents{border:0;contain:strict;display:flex!important;flex-direction:row;gap:60px;height:var(--comment-pre-load-sizing);margin:0;overflow:hidden;padding:0;width:var(--comment-pre-load-sizing)}ytd-watch-flexy:not([keep-comments-scroller]) #tab-comments.tab-content-hidden ytd-comments#comments #contents{--comment-pre-load-display:none}ytd-watch-flexy:not([keep-comments-scroller]) #tab-comments.tab-content-hidden ytd-comments#comments #contents>:last-child,ytd-watch-flexy:not([keep-comments-scroller]) #tab-comments.tab-content-hidden ytd-comments#comments #contents>:only-of-type{--comment-pre-load-display:block}ytd-watch-flexy:not([keep-comments-scroller]) #tab-comments.tab-content-hidden ytd-comments#comments #contents>*{display:var(--comment-pre-load-display)!important}#right-tabs #material-tabs{border:1px solid var(--ytd-searchbox-legacy-border-color);display:flex;overflow:hidden;padding:0;position:relative}[tyt-tab] #right-tabs #material-tabs{border-radius:var(--tyt-rounded-a1) var(--tyt-rounded-a1) var(--tyt-rounded-a1) var(--tyt-rounded-a1)}[tyt-tab^="#"] #right-tabs #material-tabs{border-radius:var(--tyt-rounded-a1) var(--tyt-rounded-a1) 0 0}ytd-watch-flexy:not([is-two-columns_]) #right-tabs #material-tabs{outline:0}#right-tabs #material-tabs a.tab-btn[tyt-tab-content]>*{pointer-events:none}#right-tabs #material-tabs a.tab-btn[tyt-tab-content]>.font-size-right{display:none;pointer-events:auto}ytd-watch-flexy #right-tabs .tab-content{border:1px solid var(--ytd-searchbox-legacy-border-color);border-radius:0 0 var(--tyt-rounded-a1) var(--tyt-rounded-a1);border-top:0;box-sizing:border-box;display:block;display:flex;flex-direction:row;overflow:hidden;padding:0;position:relative;top:0}ytd-watch-flexy:not([is-two-columns_]) #right-tabs .tab-content{height:100%}ytd-watch-flexy #right-tabs .tab-content-cld{--tab-content-padding:var(--ytd-margin-4x);box-sizing:border-box;contain:layout paint;display:block;overflow:auto;padding:var(--tab-content-padding);position:relative;width:100%}#right-tabs,.tab-content,.tab-content-cld{animation:none;transition:none}#right-tabs #emojis.ytd-commentbox{inset:auto 0 auto 0;width:auto}ytd-watch-flexy[is-two-columns_] #right-tabs .tab-content-cld{contain:size style;height:100%;position:absolute;width:100%}ytd-watch-flexy #right-tabs .tab-content-cld.tab-content-hidden{contain:size layout paint style;display:none;width:100%}@supports (color:var(--tabview-tab-btn-define )){ytd-watch-flexy #right-tabs .tab-btn{background:var(--yt-spec-general-background-a)}html{--tyt-tab-btn-flex-grow:1;--tyt-tab-btn-flex-basis:0%;--tyt-tab-bar-color-1-def:#ff4533;--tyt-tab-bar-color-2-def:var(--yt-brand-light-red);--tyt-tab-bar-color-1:var(--main-color,var(--tyt-tab-bar-color-1-def));--tyt-tab-bar-color-2:var(--main-color,var(--tyt-tab-bar-color-2-def))}ytd-watch-flexy #right-tabs .tab-btn[tyt-tab-content]{--tyt-tab-btn-color:var(--yt-spec-text-secondary);background-color:var(--ytd-searchbox-legacy-button-color);border:0;border-bottom:4px solid transparent;color:var(--tyt-tab-btn-color);cursor:pointer;display:inline-block;flex-basis:0%;flex-basis:var(--tyt-tab-btn-flex-basis);flex-grow:1;flex-grow:var(--tyt-tab-btn-flex-grow);flex-shrink:1;font-size:12px;font-weight:500;line-height:18px;overflow:hidden;padding:14px 8px 10px;position:relative;text-align:center;text-decoration:none;text-overflow:clip;text-transform:uppercase;text-transform:var(--yt-button-text-transform,inherit);transition:border .2s linear .1s;white-space:nowrap}ytd-watch-flexy #right-tabs .tab-btn[tyt-tab-content]>svg{fill:var(--iron-icon-fill-color,currentcolor);stroke:var(--iron-icon-stroke-color,none);color:var(--yt-button-color,inherit);height:18px;margin-right:0;opacity:.5;padding-right:0;vertical-align:bottom}ytd-watch-flexy #right-tabs .tab-btn{--tabview-btn-txt-ml:8px}ytd-watch-flexy[tyt-comment-disabled] #right-tabs .tab-btn[tyt-tab-content="#tab-comments"]{--tabview-btn-txt-ml:0px}ytd-watch-flexy #right-tabs .tab-btn[tyt-tab-content]>svg+span{margin-left:var(--tabview-btn-txt-ml)}ytd-watch-flexy #right-tabs .tab-btn[tyt-tab-content] svg{pointer-events:none}ytd-watch-flexy #right-tabs .tab-btn[tyt-tab-content].active{--tyt-tab-btn-color:var(--yt-spec-text-primary);background-color:var(--ytd-searchbox-legacy-button-focus-color);border-bottom-color:var(--tyt-tab-bar-color-1);border-bottom:2px solid var(--tyt-tab-bar-color-2);font-weight:500;outline:0}ytd-watch-flexy #right-tabs .tab-btn[tyt-tab-content].active svg{opacity:.9}ytd-watch-flexy #right-tabs .tab-btn[tyt-tab-content]:not(.active):hover{--tyt-tab-btn-color:var(--yt-spec-text-primary);background-color:var(--ytd-searchbox-legacy-button-hover-color)}ytd-watch-flexy #right-tabs .tab-btn[tyt-tab-content]:not(.active):hover svg{opacity:.9}ytd-watch-flexy #right-tabs .tab-btn[tyt-tab-content]{user-select:none!important}ytd-watch-flexy #right-tabs .tab-btn[tyt-tab-content].tab-btn-hidden{display:none}ytd-watch-flexy[tyt-comment-disabled] #right-tabs .tab-btn[tyt-tab-content="#tab-comments"],ytd-watch-flexy[tyt-comment-disabled] #right-tabs .tab-btn[tyt-tab-content="#tab-comments"]:hover{--tyt-tab-btn-color:var(--yt-spec-text-disabled)}ytd-watch-flexy[tyt-comment-disabled] #right-tabs .tab-btn[tyt-tab-content="#tab-comments"] span#tyt-cm-count:empty{display:none}ytd-watch-flexy #right-tabs .tab-btn span#tyt-cm-count:empty:after{color:currentColor;display:inline-block;font-size:inherit;text-align:left;transform:scaleX(.8);width:4em}}@supports (color:var(--tyt-cm-count-define )){ytd-watch-flexy{--tyt-x-loading-content-letter-spacing:2px}html{--tabview-text-loading:"Loading";--tabview-text-fetching:"Fetching";--tabview-panel-loading:var(--tabview-text-loading)}ytd-watch-flexy #right-tabs .tab-btn span#tyt-cm-count:empty:after{content:var(--tabview-text-loading);letter-spacing:var(--tyt-x-loading-content-letter-spacing)}}@supports (color:var(--tabview-font-size-btn-define )){.font-size-right{align-content:space-evenly;bottom:0;display:inline-flex;flex-direction:column;justify-content:space-evenly;padding:4px 0;pointer-events:none;position:absolute;right:0;top:0;width:16px}html body ytd-watch-flexy.style-scope .font-size-btn{user-select:none!important}.font-size-btn{--tyt-font-size-btn-display:none;background-color:var(--yt-spec-badge-chip-background);box-sizing:border-box;color:var(--yt-spec-text-secondary);cursor:pointer;display:var(--tyt-font-size-btn-display,none);font-family:Menlo,Lucida Console,Monaco,Consolas,monospace;font-weight:900;height:12px;line-height:100%;margin:0;padding:0;pointer-events:all;position:relative;transform-origin:left top;transition:background-color 90ms linear,color 90ms linear;width:12px}.font-size-btn:hover{background-color:var(--yt-spec-text-primary);color:var(--yt-spec-general-background-a)}@supports (zoom:0.5){.tab-btn .font-size-btn{--tyt-font-size-btn-display:none}.tab-btn.active:hover .font-size-btn{--tyt-font-size-btn-display:inline-block}}}body ytd-watch-flexy:not([is-two-columns_]) #columns.ytd-watch-flexy{flex-direction:column}body ytd-watch-flexy:not([is-two-columns_]) #secondary.ytd-watch-flexy{box-sizing:border-box;display:block;width:100%}body ytd-watch-flexy:not([is-two-columns_]) #secondary.ytd-watch-flexy secondary-wrapper{contain:content;height:auto;padding-left:var(--ytd-margin-6x)}body ytd-watch-flexy:not([is-two-columns_]) #secondary.ytd-watch-flexy secondary-wrapper #right-tabs{overflow:auto}[tyt-chat="+"]{--tyt-chat-grow:1}[tyt-chat="+"] secondary-wrapper>[tyt-chat-container]{display:flex;flex-direction:column;flex-grow:var(--tyt-chat-grow);flex-shrink:0}[tyt-chat="+"] secondary-wrapper>[tyt-chat-container]>#chat{flex-grow:var(--tyt-chat-grow)}ytd-watch-flexy[is-two-columns_]:not([theater]) #columns.style-scope.ytd-watch-flexy{min-height:calc(100vh - var(--ytd-toolbar-height, 56px))}ytd-watch-flexy[is-two-columns_]:not([full-bleed-player]) ytd-live-chat-frame#chat{height:auto!important;min-height:auto!important}ytd-watch-flexy[tyt-tab^="#"]:not([is-two-columns_]):not([tyt-chat="+"]) #right-tabs{min-height:var(--ytd-watch-flexy-chat-max-height)}body ytd-watch-flexy:not([is-two-columns_]) #chat.ytd-watch-flexy{margin-top:0}body ytd-watch-flexy:not([is-two-columns_]) ytd-watch-metadata.ytd-watch-flexy{margin-bottom:0}ytd-watch-metadata.ytd-watch-flexy ytd-metadata-row-container-renderer{display:none}#tab-info [show-expand-button] #expand-sizer.ytd-text-inline-expander{visibility:initial}#tab-info #collapse.button.ytd-text-inline-expander{display:none}#tab-info #social-links.style-scope.ytd-video-description-infocards-section-renderer>#left-arrow-container.ytd-video-description-infocards-section-renderer>#left-arrow,#tab-info #social-links.style-scope.ytd-video-description-infocards-section-renderer>#right-arrow-container.ytd-video-description-infocards-section-renderer>#right-arrow{border:6px solid transparent;opacity:.65}#tab-info #social-links.style-scope.ytd-video-description-infocards-section-renderer>#left-arrow-container.ytd-video-description-infocards-section-renderer>#left-arrow:hover,#tab-info #social-links.style-scope.ytd-video-description-infocards-section-renderer>#right-arrow-container.ytd-video-description-infocards-section-renderer>#right-arrow:hover{opacity:1}#tab-info #social-links.style-scope.ytd-video-description-infocards-section-renderer>div#left-arrow-container:before{background:transparent;content:"";display:block;height:40px;left:-20px;position:absolute;top:0;width:40px;z-index:-1}#tab-info #social-links.style-scope.ytd-video-description-infocards-section-renderer>div#right-arrow-container:before{background:transparent;content:"";display:block;height:40px;position:absolute;right:-20px;top:0;width:40px;z-index:-1}body ytd-watch-flexy[is-two-columns_][tyt-egm-panel_] #columns.style-scope.ytd-watch-flexy #panels.style-scope.ytd-watch-flexy{display:flex;flex-direction:column;flex-grow:1;flex-shrink:0}body ytd-watch-flexy[is-two-columns_][tyt-egm-panel_] #columns.style-scope.ytd-watch-flexy #panels.style-scope.ytd-watch-flexy ytd-engagement-panel-section-list-renderer[target-id][visibility=ENGAGEMENT_PANEL_VISIBILITY_EXPANDED]{display:flex;flex-direction:column;flex-grow:1;flex-shrink:0;height:auto;max-height:none;min-height:auto}secondary-wrapper [visibility=ENGAGEMENT_PANEL_VISIBILITY_EXPANDED] #body.ytd-transcript-renderer:not(:empty),secondary-wrapper [visibility=ENGAGEMENT_PANEL_VISIBILITY_EXPANDED] #content.ytd-transcript-renderer:not(:empty),secondary-wrapper [visibility=ENGAGEMENT_PANEL_VISIBILITY_EXPANDED] ytd-transcript-renderer:not(:empty){flex-grow:1;height:auto;max-height:none;min-height:auto}secondary-wrapper #content.ytd-engagement-panel-section-list-renderer{position:relative}secondary-wrapper #content.ytd-engagement-panel-section-list-renderer>[panel-target-id]:only-child{contain:style size}secondary-wrapper #content.ytd-engagement-panel-section-list-renderer ytd-transcript-segment-list-renderer.ytd-transcript-search-panel-renderer{contain:strict;flex-grow:1}secondary-wrapper #content.ytd-engagement-panel-section-list-renderer ytd-transcript-segment-renderer.style-scope.ytd-transcript-segment-list-renderer,secondary-wrapper #content.ytd-engagement-panel-section-list-renderer ytd-transcript-segment-renderer.style-scope.ytd-transcript-segment-list-renderer>.segment{contain:layout paint style}body ytd-watch-flexy[theater] #secondary.ytd-watch-flexy{margin-top:var(--ytd-margin-3x);padding-top:0}body ytd-watch-flexy[theater] secondary-wrapper{margin-top:0;padding-top:0}body ytd-watch-flexy[theater] #chat.ytd-watch-flexy{margin-bottom:var(--ytd-margin-2x)}#tab-comments ytd-comments#comments [field-of-cm-count]{margin-top:0}#tab-info>ytd-expandable-video-description-body-renderer{margin-bottom:var(--ytd-margin-3x)}#tab-info [class]:last-child{margin-bottom:0;padding-bottom:0}#tab-info ytd-rich-metadata-row-renderer ytd-rich-metadata-renderer{max-width:none}ytd-watch-flexy[is-two-columns_] secondary-wrapper #chat.ytd-watch-flexy{margin-bottom:var(--ytd-margin-3x)}ytd-watch-flexy[tyt-tab] tp-yt-paper-tooltip{contain:content;white-space:nowrap}ytd-watch-info-text tp-yt-paper-tooltip.style-scope.ytd-watch-info-text{margin-bottom:-300px;margin-top:-96px}[hide-default-text-inline-expander] #bottom-row #description.ytd-watch-metadata{font-size:1.2rem;line-height:1.8rem}[hide-default-text-inline-expander] #bottom-row #description.ytd-watch-metadata yt-animated-rolling-number{font-size:inherit}[hide-default-text-inline-expander] #bottom-row #description.ytd-watch-metadata #info-container.style-scope.ytd-watch-info-text{align-items:center}ytd-watch-flexy[hide-default-text-inline-expander]{--tyt-bottom-watch-metadata-margin:6px}[hide-default-text-inline-expander] #bottom-row #description.ytd-watch-metadata>#description-inner.ytd-watch-metadata{margin:6px 12px}[hide-default-text-inline-expander] ytd-watch-metadata[title-headline-xs] h1.ytd-watch-metadata{font-size:1.8rem}ytd-watch-flexy[is-two-columns_][hide-default-text-inline-expander] #below.style-scope.ytd-watch-flexy ytd-merch-shelf-renderer{border:0;margin:0;padding:0}ytd-watch-flexy[is-two-columns_][hide-default-text-inline-expander] #below.style-scope.ytd-watch-flexy ytd-watch-metadata.ytd-watch-flexy{margin-bottom:6px}#tab-info yt-video-attribute-view-model .yt-video-attribute-view-model--horizontal .yt-video-attribute-view-model__link-container .yt-video-attribute-view-model__hero-section{flex-shrink:0}#tab-info yt-video-attribute-view-model .yt-video-attribute-view-model__overflow-menu{background:var(--yt-emoji-picker-category-background-color);border-radius:99px}#tab-info yt-video-attribute-view-model .yt-video-attribute-view-model--image-square.yt-video-attribute-view-model--image-large .yt-video-attribute-view-model__hero-section{max-height:128px}#tab-info yt-video-attribute-view-model .yt-video-attribute-view-model--image-large .yt-video-attribute-view-model__hero-section{max-width:128px}#tab-info ytd-reel-shelf-renderer #items.yt-horizontal-list-renderer ytd-reel-item-renderer.yt-horizontal-list-renderer{max-width:142px}ytd-watch-info-text#ytd-watch-info-text.style-scope.ytd-watch-metadata #date-text.style-scope.ytd-watch-info-text,ytd-watch-info-text#ytd-watch-info-text.style-scope.ytd-watch-metadata #view-count.style-scope.ytd-watch-info-text{align-items:center}ytd-watch-info-text:not([detailed]) #info.ytd-watch-info-text a.yt-simple-endpoint.yt-formatted-string{pointer-events:none}body ytd-app>ytd-popup-container>tp-yt-iron-dropdown>#contentWrapper>[slot=dropdown-content]{backdrop-filter:none}#tab-info [tyt-clone-refresh-count]{overflow:visible!important}#tab-info #items.ytd-horizontal-card-list-renderer yt-video-attribute-view-model.ytd-horizontal-card-list-renderer{contain:layout}#tab-info #thumbnail-container.ytd-structured-description-channel-lockup-renderer,#tab-info ytd-media-lockup-renderer[is-compact] #thumbnail-container.ytd-media-lockup-renderer{flex-shrink:0}secondary-wrapper ytd-donation-unavailable-renderer{--ytd-margin-6x:var(--ytd-margin-2x);--ytd-margin-5x:var(--ytd-margin-2x);--ytd-margin-4x:var(--ytd-margin-2x);--ytd-margin-3x:var(--ytd-margin-2x)}[tyt-no-less-btn] #less{display:none}.tyt-metadata-hover-resized #analytics-button,.tyt-metadata-hover-resized #purchase-button,.tyt-metadata-hover-resized #sponsor-button,.tyt-metadata-hover-resized #subscribe-button{display:none!important}.tyt-metadata-hover #upload-info{flex-basis:100vw;flex-shrink:0;max-width:max-content;min-width:max-content}#tab-info ytd-structured-description-playlist-lockup-renderer[collections] #playlist-thumbnail.style-scope.ytd-structured-description-playlist-lockup-renderer{max-width:100%}#tab-info ytd-structured-description-playlist-lockup-renderer[collections] #lockup-container.ytd-structured-description-playlist-lockup-renderer{padding:1px}#tab-info ytd-structured-description-playlist-lockup-renderer[collections] #thumbnail.ytd-structured-description-playlist-lockup-renderer{outline:1px solid hsla(0,0%,50%,.5)}ytd-live-chat-frame#chat[collapsed] ytd-message-renderer~#show-hide-button.ytd-live-chat-frame>ytd-toggle-button-renderer.ytd-live-chat-frame{padding:0}.tyt-info-invisible{display:none}[tyt-playlist-expanded] secondary-wrapper>ytd-playlist-panel-renderer#playlist{flex-grow:1;flex-shrink:1;max-height:unset!important;overflow:auto}[tyt-playlist-expanded] secondary-wrapper>ytd-playlist-panel-renderer#playlist>#container{max-height:unset!important}secondary-wrapper ytd-playlist-panel-renderer{--ytd-margin-6x:var(--ytd-margin-3x)}ytd-watch-flexy[theater] ytd-playlist-panel-renderer[collapsible][collapsed] .header.ytd-playlist-panel-renderer{padding:6px 8px}ytd-watch-flexy[theater] #playlist.ytd-watch-flexy{margin-bottom:var(--ytd-margin-2x)}ytd-watch-flexy[theater] #right-tabs .tab-btn[tyt-tab-content]{border-bottom:0 solid transparent;padding:8px 4px 6px}ytd-watch-flexy{--tyt-bottom-watch-metadata-margin:12px}ytd-watch-flexy[rounded-info-panel],ytd-watch-flexy[rounded-player-large]{--tyt-rounded-a1:${VAL_ROUNDED_A1}px}#bottom-row.style-scope.ytd-watch-metadata .item.ytd-watch-metadata{margin-right:var(--tyt-bottom-watch-metadata-margin,12px);margin-top:var(--tyt-bottom-watch-metadata-margin,12px)}#cinematics{contain:layout style size}body[data-ytlstm-theater-mode] #secondary-inner[class]>secondary-wrapper[class]:not(#chat-container):not(#chat){display:flex!important}body[data-ytlstm-theater-mode] secondary-wrapper{all:unset;height:100vh}body[data-ytlstm-theater-mode] #right-tabs{display:none}body[data-ytlstm-theater-mode] [data-ytlstm-chat-over-video] [tyt-chat="+"]{--tyt-chat-grow:unset}body[data-ytlstm-theater-mode] [data-ytlstm-chat-over-video] #chat-container.style-scope,body[data-ytlstm-theater-mode] [data-ytlstm-chat-over-video] #columns.style-scope.ytd-watch-flexy,body[data-ytlstm-theater-mode] [data-ytlstm-chat-over-video] #secondary-inner.style-scope.ytd-watch-flexy,body[data-ytlstm-theater-mode] [data-ytlstm-chat-over-video] #secondary.style-scope.ytd-watch-flexy,body[data-ytlstm-theater-mode] [data-ytlstm-chat-over-video] [tyt-chat-container].style-scope,body[data-ytlstm-theater-mode] [data-ytlstm-chat-over-video] secondary-wrapper{pointer-events:none}body[data-ytlstm-theater-mode] [data-ytlstm-chat-over-video] #chat[class]{pointer-events:auto}@supports (color:var(--tyt-fix-20251124 )){#below ytd-watch-metadata .ytTextCarouselItemViewModelImageType{height:16px;width:16px}#below ytd-watch-metadata yt-text-carousel-item-view-model{column-gap:6px}#below ytd-watch-metadata ytd-watch-info-text#ytd-watch-info-text{font-size:inherit;line-height:inherit}}` + `[tyt-tab] #right-tabs #material-tabs,[tyt-tab^="#"] #right-tabs #material-tabs{border-radius:12px 12px 0 0!important}ytd-watch-flexy #right-tabs .tab-content{border-radius:0 0 12px 12px!important}ytd-watch-flexy[is-two-columns_] #right-tabs .tab-content-cld{scrollbar-color:rgba(0,0,0,.25) transparent;scrollbar-width:thin}ytd-watch-flexy[is-two-columns_] #right-tabs .tab-content-cld::-webkit-scrollbar{width:4px}ytd-watch-flexy[is-two-columns_] #right-tabs .tab-content-cld::-webkit-scrollbar-thumb{background-color:rgba(0,0,0,.25);border-radius:4px}ytd-watch-flexy[is-two-columns_] #right-tabs .tab-content-cld::-webkit-scrollbar-track{background:transparent}`;
-            Utils.injectCSS(css + `#right-tabs #material-tabs button.tab-btn[tyt-tab-content]{align-items:center;background:var(--ytd-searchbox-legacy-button-color);border:0;border-bottom:4px solid transparent;color:var(--yt-spec-text-secondary);cursor:pointer;display:inline-flex;flex:1 1 0%;font:500 12px/18px Roboto,Arial,sans-serif;gap:6px;justify-content:center;min-width:0;overflow:hidden;padding:14px 8px 10px;text-align:center}#right-tabs #material-tabs button.tab-btn[tyt-tab-content].active{border-bottom-color:var(--yt-brand-light-red,#ff0033);color:var(--yt-spec-text-primary)}#right-tabs #material-tabs button.tab-btn[tyt-tab-content]>*{pointer-events:none}#right-tabs #material-tabs button.tab-btn-hidden{display:none!important}`, 'yt-enhancer-tabview-css');
-
-            const executionScript = () => {
-                const STATE_KEY = '__ytEnhancerTabviewEdgeState__';
-                const previousState = window[STATE_KEY];
-                if (previousState?.cleanup) previousState.cleanup();
-
-                const state = {
-                    observer: null,
-                    scheduled: false,
-                    lastUrl: location.href,
-                    cleanupHandlers: []
-                };
-                window[STATE_KEY] = state;
-
-                const langWords = {
-                    en: { info: 'Info', videos: 'Videos', playlist: 'Playlist', comments: 'Comments' },
-                    pt: { info: 'Descrição', videos: 'Vídeos', playlist: 'Lista', comments: 'Comentários' }
-                };
-                const getLang = () => document.documentElement.lang?.startsWith('pt') ? 'pt' : 'en';
-                const getWord = (tag) => langWords[getLang()]?.[tag] || langWords.en[tag] || '';
-                const safeQuery = (selector, root = document) => {
-                    try { return root.querySelector(selector); } catch (error) { return null; }
-                };
-                const safeQueryAll = (selector, root = document) => {
-                    try { return [...root.querySelectorAll(selector)]; } catch (error) { return []; }
-                };
-                const schedule = () => {
-                    if (state.scheduled) return;
-                    state.scheduled = true;
-                    const run = () => {
-                        state.scheduled = false;
-                        try { applyTabview(); } catch (error) { console.warn('[YT Enhancer][Tabview] Falha ao aplicar layout:', error); }
-                    };
-                    if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 800 });
-                    else requestAnimationFrame(() => setTimeout(run, 0));
-                };
-
-                const svgInfo = '<path fill="currentColor" d="M11 17h2v-6h-2v6zm1-14a9 9 0 100 18 9 9 0 000-18zm0 16a7 7 0 110-14 7 7 0 010 14zm-1-10h2V7h-2v2z"/>';
-                const svgComments = '<path fill="currentColor" d="M20 2H4a2 2 0 00-2 2v18l4-4h14a2 2 0 002-2V4a2 2 0 00-2-2z"/>';
-                const svgVideos = '<path fill="currentColor" d="M10 8v8l6-4-6-4zm12-6H2v20h20V2zm-2 18H4V4h16v16z"/>';
-                const svgPlaylist = '<path fill="currentColor" d="M4 10h12v2H4v-2zm0-4h12v2H4V6zm0 8h8v2H4v-2zm10 0v6l5-3-5-3z"/>';
-                const tabDefinitions = () => [
-                    ['tab-btn1', '#tab-info', svgInfo, getWord('info')],
-                    ['tab-btn3', '#tab-comments', svgComments, getWord('comments')],
-                    ['tab-btn4', '#tab-videos', svgVideos, getWord('videos')],
-                    ['tab-btn5', '#tab-list', svgPlaylist, getWord('playlist'), true]
-                ];
-
-                const createTabButton = ([id, target, svgPath, label, hidden]) => {
-                    const button = document.createElement('button');
-                    button.id = id;
-                    button.type = 'button';
-                    button.className = `tab-btn${hidden ? ' tab-btn-hidden' : ''}`;
-                    button.setAttribute('tyt-tab-content', target);
-                    button.setAttribute('aria-controls', target.slice(1));
-                    button.setAttribute('aria-selected', 'false');
-                    button.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" preserveAspectRatio="xMidYMid meet" aria-hidden="true">${svgPath}</svg><span>${label}</span>`;
-                    return button;
-                };
-
-                const createTabs = () => {
-                    const rightTabs = document.createElement('div');
-                    rightTabs.id = 'right-tabs';
-
-                    const header = document.createElement('header');
-                    const nav = document.createElement('div');
-                    nav.id = 'material-tabs';
-                    nav.setAttribute('role', 'tablist');
-                    tabDefinitions().forEach((definition) => nav.appendChild(createTabButton(definition)));
-                    header.appendChild(nav);
-
-                    const content = document.createElement('div');
-                    content.className = 'tab-content';
-                    [['tab-info'], ['tab-comments'], ['tab-videos'], ['tab-list']].forEach(([id]) => {
-                        const pane = document.createElement('div');
-                        pane.id = id;
-                        pane.className = 'tab-content-cld tab-content-hidden';
-                        pane.setAttribute('tyt-hidden', '');
-                        content.appendChild(pane);
-                    });
-
-                    rightTabs.append(header, content);
-                    nav.addEventListener('click', (event) => {
-                        const targetButton = event.target.closest('button[tyt-tab-content]');
-                        if (!targetButton) return;
-                        activateTab(rightTabs, targetButton.getAttribute('tyt-tab-content'));
-                    });
-                    return rightTabs;
-                };
-
-                const activateTab = (rightTabs, selector = '#tab-videos') => {
-                    safeQueryAll('#material-tabs button[tyt-tab-content]', rightTabs).forEach((button) => {
-                        const active = button.getAttribute('tyt-tab-content') === selector;
-                        button.classList.toggle('active', active);
-                        button.setAttribute('aria-selected', String(active));
-                    });
-                    safeQueryAll('.tab-content-cld', rightTabs).forEach((pane) => {
-                        const active = `#${pane.id}` === selector;
-                        pane.classList.toggle('tab-content-hidden', !active);
-                        if (active) pane.removeAttribute('tyt-hidden');
-                        else pane.setAttribute('tyt-hidden', '');
-                    });
-                };
-
-                const ensureWrapper = (secondaryInner) => {
-                    let wrapper = safeQuery('#secondary-inner-wrapper', secondaryInner);
-                    if (!wrapper) {
-                        wrapper = document.createElement('secondary-wrapper');
-                        wrapper.id = 'secondary-inner-wrapper';
-                        secondaryInner.appendChild(wrapper);
-                    }
-                    return wrapper;
-                };
-
-                const moveIfAvailable = (selector, targetSelector, root) => {
-                    const element = safeQuery(selector);
-                    const target = safeQuery(targetSelector, root);
-                    if (element && target && element.parentElement !== target) target.appendChild(element);
-                };
-
-                const applyTabview = () => {
-                    if (!/^\/watch(?:$|[/?#])/.test(location.pathname)) return;
-                    const flexy = safeQuery('ytd-watch-flexy');
-                    const related = safeQuery('#related');
-                    const secondaryInner = safeQuery('#secondary-inner.style-scope.ytd-watch-flexy') || safeQuery('#secondary-inner');
-                    if (!flexy || !related || !secondaryInner) return;
-
-                    document.documentElement.setAttribute('tabview-loaded', 'icp');
-                    flexy.setAttribute('tyt-tab', '#tab-videos');
-                    flexy.style.setProperty('--tyt-rounded-a1', '12px');
-
-                    const wrapper = ensureWrapper(secondaryInner);
-                    let rightTabs = safeQuery('#right-tabs', wrapper) || safeQuery('#right-tabs');
-                    if (!rightTabs) rightTabs = createTabs();
-                    if (rightTabs.parentElement !== wrapper) wrapper.appendChild(rightTabs);
-
-                    moveIfAvailable('#related', '#tab-videos', rightTabs);
-                    moveIfAvailable('#comments', '#tab-comments', rightTabs);
-                    moveIfAvailable('ytd-watch-metadata', '#tab-info', rightTabs);
-                    activateTab(rightTabs, safeQuery('#material-tabs button.active', rightTabs)?.getAttribute('tyt-tab-content') || '#tab-videos');
-                };
-
-                const onNavigation = () => {
-                    if (state.lastUrl !== location.href) {
-                        state.lastUrl = location.href;
-                        schedule();
-                    }
-                };
-
-                state.observer = new MutationObserver(schedule);
-                state.observer.observe(document.documentElement, { childList: true, subtree: true });
-                ['yt-navigate-finish', 'yt-page-data-updated', 'yt-rendererstamper-finished'].forEach((eventName) => {
-                    document.addEventListener(eventName, schedule);
-                    state.cleanupHandlers.push(() => document.removeEventListener(eventName, schedule));
-                });
-                window.addEventListener('popstate', onNavigation);
-                state.cleanupHandlers.push(() => window.removeEventListener('popstate', onNavigation));
-                state.cleanup = () => {
-                    state.observer?.disconnect();
-                    state.cleanupHandlers.forEach((cleanup) => cleanup());
-                    state.cleanupHandlers = [];
-                    if (window[STATE_KEY] === state) delete window[STATE_KEY];
-                };
-                schedule();
-            };
-
-            const script = document.createElement('script');
-            script.textContent = '(' + executionScript.toString() + ')();';
-            document.documentElement.appendChild(script);
-            script.remove();
-        }
-    };
-
-    // =======================================================
     // INITIALIZATION CORE
     // =======================================================
     const EnhancerCore = {
@@ -1058,7 +938,6 @@
                 try { StyleManager.init(); StyleManager.apply(config); } catch (e) {}
                 try { ShortsManager.init(config); } catch (e) {}
                 try { ClockManager.init(config); } catch (e) {}
-                try { TabviewManager.init(config); } catch (e) {}
                 
                 EventBus.on('configChanged', (newConfig) => {
                     try {
