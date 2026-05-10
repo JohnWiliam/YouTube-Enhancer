@@ -2,7 +2,7 @@
 
 > **Optimize, Customize, and Take control of your YouTube experience.** > **Otimize, personalize e domine sua experiência no YouTube.**
 
-![Version](https://img.shields.io/badge/Version-2.1.1-blue)
+![Version](https://img.shields.io/badge/Version-v2.2.0--Edge-blue)
 ![Language](https://img.shields.io/badge/Language-JavaScript-F7DF1E?logo=javascript&logoColor=F7DF1E)
 ![Author](https://img.shields.io/badge/Author-John%20Wiliam%20%26%20IA-orange)
 [![Install](https://img.shields.io/badge/Install-Click_Here-green)](https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js)
@@ -15,7 +15,7 @@
 
 ## 🇺🇸 English
 
-YouTube Enhancer is a powerful userscript for **Violentmonkey** that improves YouTube performance, visual clarity, and usability through a modern settings panel.
+YouTube Enhancer is a powerful userscript for **Tampermonkey on Microsoft Edge** that improves YouTube performance, Edge compatibility, and usability through a modern settings panel.
 
 ### ✨ Main Features
 
@@ -34,15 +34,14 @@ YouTube Enhancer is a powerful userscript for **Violentmonkey** that improves Yo
    - Displays time overlay during fullscreen playback.
    - Fully customizable: colors, opacity, size, margin, border radius.
 
-5. **🧼 RTX Visual Mode (No Blur/Translucency)**
-   - Removes blur/backdrop-filter effects from YouTube UI.
-   - Replaces translucent backgrounds with transparency.
-   - *New in 2.1.1:* Keeps timeline hover preview thumbnails (including chapter previews) visible while RTX Mode is active.
+5. **🧩 Tabbed Layout (Tabview)**
+   - Organizes video details, comments, and recommendations into side tabs.
+   - Uses a MutationObserver-based SPA-safe engine for YouTube navigation.
 
 ### ⚙️ Settings Panel
 
 No code editing required:
-1. Open the Violentmonkey script menu.
+1. Open the Tampermonkey script menu.
 2. Click **"⚙️ Settings"**.
 3. Configure features and clock appearance.
 
@@ -50,7 +49,7 @@ No code editing required:
 
 ### 📥 Installation
 
-1. Install **Violentmonkey** in your browser.
+1. Install **Tampermonkey** in Microsoft Edge.
 2. Install the script via direct link (badge above) or paste the source manually.
 3. Open `www.youtube.com`.
 
@@ -69,7 +68,7 @@ Developed by **John Wiliam** with **AI assistance**.
 
 ## 🇧🇷 Português
 
-O YouTube Enhancer é um userscript poderoso para **Violentmonkey** que melhora desempenho, limpeza visual e usabilidade do YouTube por meio de um painel moderno de configurações.
+O YouTube Enhancer é um userscript poderoso para **Tampermonkey no Microsoft Edge** que melhora compatibilidade com Edge, desempenho e usabilidade do YouTube por meio de um painel moderno de configurações.
 
 ### ✨ Funcionalidades Principais
 
@@ -88,15 +87,14 @@ O YouTube Enhancer é um userscript poderoso para **Violentmonkey** que melhora 
    - Exibe hora sobre o vídeo em tela cheia.
    - Totalmente personalizável: cores, opacidade, tamanho, margem e borda.
 
-5. **🧼 Modo RTX (Sem Blur/Translucidez)**
-   - Remove efeitos de blur/backdrop-filter da interface do YouTube.
-   - Substitui fundos translúcidos por transparência.
-   - *Novo na 2.1.1:* Mantém visível a miniatura de prévia da timeline (incluindo prévias de capítulos) quando o Modo RTX está ativo.
+5. **🧩 Layout em Abas (Tabview)**
+   - Organiza descrição, comentários e recomendações em abas laterais.
+   - Usa um motor baseado em MutationObserver para respeitar a navegação SPA do YouTube.
 
 ### ⚙️ Painel de Configurações
 
 Sem editar código:
-1. Abra o menu do Violentmonkey.
+1. Abra o menu do Tampermonkey.
 2. Clique em **"⚙️ Configurações"**.
 3. Ajuste funcionalidades e aparência do relógio.
 
@@ -104,7 +102,7 @@ Sem editar código:
 
 ### 📥 Instalação
 
-1. Instale a extensão **Violentmonkey** no navegador.
+1. Instale a extensão **Tampermonkey** no Microsoft Edge.
 2. Instale o script pelo link direto (badge acima) ou cole o código-fonte manualmente.
 3. Acesse `www.youtube.com`.
 
