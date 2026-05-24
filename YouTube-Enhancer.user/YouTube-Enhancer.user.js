@@ -595,8 +595,12 @@
             });
             Object.entries(this.handlers).forEach(([k, h]) => {
                 if (!h) return;
-                if (['play','pause','ended'].includes(k)) document.removeEventListener(k, h, true);
-                else window.removeEventListener(k, h, true);
+                const eventName = k === 'visibility' ? 'visibilitychange' : k;
+                if (['visibilitychange', 'play', 'pause', 'ended'].includes(eventName)) {
+                    document.removeEventListener(eventName, h, true);
+                } else {
+                    window.removeEventListener(eventName, h, true);
+                }
             });
             this.handlers = { visibility: null, play: null, pause: null, ended: null, pagehide: null, pageshow: null, freeze: null, resume: null, online: null, offline: null };
             if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
