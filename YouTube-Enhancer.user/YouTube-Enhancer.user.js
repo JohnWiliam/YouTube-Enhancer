@@ -715,12 +715,9 @@
                 return self.originals.setTimeout.apply(targetWindow, [callback, d, ...args]);
             });
 
-            applyOverride('requestAnimationFrame', function(callback) {
-                if (self.state.throttlingLevel > 0 || typeof self.originals.requestAnimationFrame !== 'function') {
-                    const id = ++self.rafFallbackId;
+                    const id = 1000000 + ++self.rafFallbackId;
                     const d = self.state.throttlingLevel === 1 ? 42 : 1000;
                     
-                    // CORREÇÃO 3: Consistência usando apply no setTimeout original
                     const tid = self.originals.setTimeout.apply(targetWindow, [() => {
                         self.rafFallbackTimers.delete(id);
                         callback((targetWindow.performance || performance).now());
