@@ -318,7 +318,8 @@
             layoutSettings.append(layoutText, create('input', { id: 'cfg-videos-row', className: 'styled-input-small', type: 'number', min: 3, max: 8, value: config.VIDEOS_PER_ROW }));
             optionsList.append(layoutSettings);
 
-            optionsList.append(                createToggle('cfg-shorts', t('modal.features.shorts.title', config.LANGUAGE), t('modal.features.shorts.description', config.LANGUAGE), config.FEATURES.SHORTS_REMOVAL),
+            optionsList.append(
+                createToggle('cfg-shorts', t('modal.features.shorts.title', config.LANGUAGE), t('modal.features.shorts.description', config.LANGUAGE), config.FEATURES.SHORTS_REMOVAL),
                 createToggle('cfg-clock-enable', t('modal.features.clock.title', config.LANGUAGE), t('modal.features.clock.description', config.LANGUAGE), config.FEATURES.FULLSCREEN_CLOCK),
                 createToggle('cfg-rtx-visual', t('modal.features.rtx.title', config.LANGUAGE), t('modal.features.rtx.description', config.LANGUAGE), config.FEATURES.RTX_VISUAL_MODE)
             );
@@ -567,7 +568,7 @@
     };
 
     // =======================================================
-    // 4. SMART CPU TAMER
+    // 4. SMART CPU TAMER (Corrigido para v2.3.0)
     // =======================================================
     const SmartCpuTamer = {
         initialized: false,
@@ -575,24 +576,37 @@
         state: { hidden: false, playing: false, visibleVideo: false, networkOnline: true, throttlingLevel: 0 },
         handlers: { visibility: null, play: null, pause: null, ended: null, pagehide: null, pageshow: null, freeze: null, resume: null, online: null, offline: null },
         mainMediaElement: null, mediaStatePoller: null, rafFallbackTimers: new Map(), rafFallbackId: 0,
-        gracePeriodTimer: null, GRACE_PERIOD_MS: 15000,
+        gracePeriodTimer: null, 
+        GRACE_PERIOD_MS: 30000, 
 
         init() {
             if (this.initialized) return;
-            this.originals.setInterval = targetWindow.setInterval.bind(targetWindow);
-            this.originals.setTimeout = targetWindow.setTimeout.bind(targetWindow);
-            this.originals.requestAnimationFrame = targetWindow.requestAnimationFrame?.bind(targetWindow);
-            this.originals.cancelAnimationFrame = targetWindow.cancelAnimationFrame?.bind(targetWindow);
+            this.originals.setInterval = targetWindow.setInterval;
+            this.originals.setTimeout = targetWindow.setTimeout;
+            this.originals.requestAnimationFrame = targetWindow.requestAnimationFrame;
+            this.originals.cancelAnimationFrame = targetWindow.cancelAnimationFrame;
             this.bindEvents();
             this.overrideTimers();
             this.initialized = true;
             this.updateState();
         },
+        
         cleanup() {
             if (!this.initialized) return;
-            ['setInterval','setTimeout','requestAnimationFrame','cancelAnimationFrame'].forEach((name) => {
-                if (typeof this.originals[name] === 'function') targetWindow[name] = this.originals[name];
-            });
+            
+            // Método seguro de restauração (Cross-browser)
+            const applyOverride = (name, original) => {
+                try {
+                    if (typeof exportFunction === 'function') exportFunction(original, targetWindow, { defineAs: name });
+                    else targetWindow[name] = original;
+                } catch(e) {}
+            };
+            
+            applyOverride('setInterval', this.originals.setInterval);
+            applyOverride('setTimeout', this.originals.setTimeout);
+            applyOverride('requestAnimationFrame', this.originals.requestAnimationFrame);
+            applyOverride('cancelAnimationFrame', this.originals.cancelAnimationFrame);
+
             Object.entries(this.handlers).forEach(([k, h]) => {
                 if (!h) return;
                 const eventName = k === 'visibility' ? 'visibilitychange' : k;
@@ -653,7 +667,7 @@
             window.addEventListener('online', this.handlers.online, true);
             window.addEventListener('offline', this.handlers.offline, true);
 
-            this.mediaStatePoller = this.originals.setInterval(() => this.updateState(), 1250);
+            this.mediaStatePoller = this.originals.setInterval.call(targetWindow, () => this.updateState(), 1250);
             this.state.hidden = document.visibilityState === 'hidden';
             this.state.networkOnline = navigator.onLine !== false;
             this.refreshPlaybackState();
@@ -668,40 +682,52 @@
         overrideTimers() {
             const self = this;
             const norm = (d) => Number.isFinite(Number(d)) ? Number(d) : 0;
-            targetWindow.setInterval = function(callback, delay, ...args) {
+            
+            // Método seguro de injeção (Cross-browser)
+            const applyOverride = (name, customFunc) => {
+                try {
+                    if (typeof exportFunction === 'function') exportFunction(customFunc, targetWindow, { defineAs: name });
+                    else targetWindow[name] = customFunc;
+                } catch (e) {}
+            };
+
+            applyOverride('setInterval', function(callback, delay, ...args) {
                 let d = norm(delay);
                 if (self.state.throttlingLevel === 2) d = Math.max(d, 4000);
                 else if (self.state.throttlingLevel === 1) d = Math.max(d, 800);
-                return self.originals.setInterval(callback, d, ...args);
-            };
-            targetWindow.setTimeout = function(callback, delay, ...args) {
+                return self.originals.setInterval.apply(targetWindow, [callback, d, ...args]);
+            });
+
+            applyOverride('setTimeout', function(callback, delay, ...args) {
                 let d = norm(delay);
                 if (self.state.throttlingLevel === 2) d = Math.max(d, 1200);
                 else if (self.state.throttlingLevel === 1) d = Math.max(d, 180);
-                return self.originals.setTimeout(callback, d, ...args);
-            };
-            targetWindow.requestAnimationFrame = function(callback) {
+                return self.originals.setTimeout.apply(targetWindow, [callback, d, ...args]);
+            });
+
+            applyOverride('requestAnimationFrame', function(callback) {
                 if (self.state.throttlingLevel > 0 || typeof self.originals.requestAnimationFrame !== 'function') {
                     const id = ++self.rafFallbackId;
                     const d = self.state.throttlingLevel === 1 ? 42 : 1000;
-                    const tid = self.originals.setTimeout(() => {
+                    const tid = self.originals.setTimeout.call(targetWindow, () => {
                         self.rafFallbackTimers.delete(id);
                         callback(performance.now());
                     }, d);
                     self.rafFallbackTimers.set(id, tid);
                     return id;
                 }
-                return self.originals.requestAnimationFrame(callback);
-            };
-            targetWindow.cancelAnimationFrame = function(id) {
+                return self.originals.requestAnimationFrame.call(targetWindow, callback);
+            });
+
+            applyOverride('cancelAnimationFrame', function(id) {
                 if (self.rafFallbackTimers.has(id)) {
                     clearTimeout(self.rafFallbackTimers.get(id));
                     self.rafFallbackTimers.delete(id);
                     return;
                 }
-                if (typeof self.originals.cancelAnimationFrame === 'function') return self.originals.cancelAnimationFrame(id);
+                if (typeof self.originals.cancelAnimationFrame === 'function') return self.originals.cancelAnimationFrame.call(targetWindow, id);
                 clearTimeout(id);
-            };
+            });
         }
     };
 
