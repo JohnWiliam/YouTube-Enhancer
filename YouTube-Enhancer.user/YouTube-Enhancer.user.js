@@ -723,7 +723,7 @@
                     // CORREÇÃO 3: Consistência usando apply no setTimeout original
                     const tid = self.originals.setTimeout.apply(targetWindow, [() => {
                         self.rafFallbackTimers.delete(id);
-                        callback(performance.now());
+                        callback((targetWindow.performance || performance).now());
                     }, d]);
                     
                     self.rafFallbackTimers.set(id, tid);
