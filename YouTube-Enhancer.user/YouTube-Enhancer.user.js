@@ -568,7 +568,7 @@
     };
 
     // =======================================================
-    // 4. SMART CPU TAMER (Corrigido para v2.3.0)
+    // 4. SMART CPU TAMER (Refatorado - Resolução de Bugs)
     // =======================================================
     const SmartCpuTamer = {
         initialized: false,
@@ -581,10 +581,12 @@
 
         init() {
             if (this.initialized) return;
+            // Salva as funções originais nativas
             this.originals.setInterval = targetWindow.setInterval;
             this.originals.setTimeout = targetWindow.setTimeout;
             this.originals.requestAnimationFrame = targetWindow.requestAnimationFrame;
             this.originals.cancelAnimationFrame = targetWindow.cancelAnimationFrame;
+            
             this.bindEvents();
             this.overrideTimers();
             this.initialized = true;
@@ -594,19 +596,14 @@
         cleanup() {
             if (!this.initialized) return;
             
-            // Método seguro de restauração (Cross-browser)
-            const applyOverride = (name, original) => {
-                try {
-                    if (typeof exportFunction === 'function') exportFunction(original, targetWindow, { defineAs: name });
-                    else targetWindow[name] = original;
-                } catch(e) {}
-            };
-            
-            applyOverride('setInterval', this.originals.setInterval);
-            applyOverride('setTimeout', this.originals.setTimeout);
-            applyOverride('requestAnimationFrame', this.originals.requestAnimationFrame);
-            applyOverride('cancelAnimationFrame', this.originals.cancelAnimationFrame);
+            // CORREÇÃO 1: Restauração direta e limpa das funções nativas.
+            // Não usamos exportFunction aqui, pois as funções originais já pertencem ao contexto da página.
+            if (this.originals.setInterval) targetWindow.setInterval = this.originals.setInterval;
+            if (this.originals.setTimeout) targetWindow.setTimeout = this.originals.setTimeout;
+            if (this.originals.requestAnimationFrame !== undefined) targetWindow.requestAnimationFrame = this.originals.requestAnimationFrame;
+            if (this.originals.cancelAnimationFrame !== undefined) targetWindow.cancelAnimationFrame = this.originals.cancelAnimationFrame;
 
+            // Limpeza de eventos
             Object.entries(this.handlers).forEach(([k, h]) => {
                 if (!h) return;
                 const eventName = k === 'visibility' ? 'visibilitychange' : k;
@@ -617,23 +614,31 @@
                 }
             });
             this.handlers = { visibility: null, play: null, pause: null, ended: null, pagehide: null, pageshow: null, freeze: null, resume: null, online: null, offline: null };
+            
+            // Limpeza de timers
             if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
             this.rafFallbackTimers.forEach(id => clearTimeout(id));
             this.rafFallbackTimers.clear();
             if (this.mediaStatePoller) clearInterval(this.mediaStatePoller);
-            this.gracePeriodTimer = null; this.mediaStatePoller = null; this.mainMediaElement = null;
+            
+            this.gracePeriodTimer = null; 
+            this.mediaStatePoller = null; 
+            this.mainMediaElement = null;
             this.initialized = false;
         },
+        
         resolveMainMediaElement(force = false) {
             if (!force && this.mainMediaElement?.isConnected) return this.mainMediaElement;
             this.mainMediaElement = Utils.DOMCache.get('#movie_player video.html5-main-video', true) || Utils.DOMCache.get('.html5-video-player video.html5-main-video', true) || Utils.DOMCache.get('#movie_player video', true) || null;
             return this.mainMediaElement;
         },
+        
         refreshPlaybackState() {
             const media = this.resolveMainMediaElement(true);
             this.state.playing = !!(media && !media.paused && !media.ended && media.readyState > 2);
             this.state.visibleVideo = !!(media && media.isConnected && media.getClientRects().length > 0);
         },
+        
         bindEvents() {
             this.handlers.visibility = () => {
                 this.state.hidden = document.visibilityState === 'hidden';
@@ -672,6 +677,7 @@
             this.state.networkOnline = navigator.onLine !== false;
             this.refreshPlaybackState();
         },
+        
         updateState(forceOptimization = false) {
             this.refreshPlaybackState();
             const graceActive = this.state.hidden && !forceOptimization && this.gracePeriodTimer;
@@ -679,15 +685,19 @@
             else if (this.state.playing && this.state.networkOnline) this.state.throttlingLevel = 1;
             else this.state.throttlingLevel = 2;
         },
+        
         overrideTimers() {
             const self = this;
             const norm = (d) => Number.isFinite(Number(d)) ? Number(d) : 0;
             
-            // Método seguro de injeção (Cross-browser)
+            // CORREÇÃO 2: Utilidade isolada apenas onde é necessária (evita repetição de código)
             const applyOverride = (name, customFunc) => {
                 try {
-                    if (typeof exportFunction === 'function') exportFunction(customFunc, targetWindow, { defineAs: name });
-                    else targetWindow[name] = customFunc;
+                    if (typeof exportFunction === 'function') {
+                        exportFunction(customFunc, targetWindow, { defineAs: name });
+                    } else {
+                        targetWindow[name] = customFunc;
+                    }
                 } catch (e) {}
             };
 
@@ -709,10 +719,13 @@
                 if (self.state.throttlingLevel > 0 || typeof self.originals.requestAnimationFrame !== 'function') {
                     const id = ++self.rafFallbackId;
                     const d = self.state.throttlingLevel === 1 ? 42 : 1000;
-                    const tid = self.originals.setTimeout.call(targetWindow, () => {
+                    
+                    // CORREÇÃO 3: Consistência usando apply no setTimeout original
+                    const tid = self.originals.setTimeout.apply(targetWindow, [() => {
                         self.rafFallbackTimers.delete(id);
                         callback(performance.now());
-                    }, d);
+                    }, d]);
+                    
                     self.rafFallbackTimers.set(id, tid);
                     return id;
                 }
@@ -725,7 +738,9 @@
                     self.rafFallbackTimers.delete(id);
                     return;
                 }
-                if (typeof self.originals.cancelAnimationFrame === 'function') return self.originals.cancelAnimationFrame.call(targetWindow, id);
+                if (typeof self.originals.cancelAnimationFrame === 'function') {
+                    return self.originals.cancelAnimationFrame.call(targetWindow, id);
+                }
                 clearTimeout(id);
             });
         }
