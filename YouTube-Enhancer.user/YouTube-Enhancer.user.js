@@ -598,10 +598,10 @@
             
             // CORREÇÃO 1: Restauração direta e limpa das funções nativas.
             // Não usamos exportFunction aqui, pois as funções originais já pertencem ao contexto da página.
-            if (this.originals.setInterval) targetWindow.setInterval = this.originals.setInterval;
-            if (this.originals.setTimeout) targetWindow.setTimeout = this.originals.setTimeout;
-            if (this.originals.requestAnimationFrame !== undefined) targetWindow.requestAnimationFrame = this.originals.requestAnimationFrame;
-            if (this.originals.cancelAnimationFrame !== undefined) targetWindow.cancelAnimationFrame = this.originals.cancelAnimationFrame;
+            targetWindow.setInterval = this.originals.setInterval;
+            targetWindow.setTimeout = this.originals.setTimeout;
+            targetWindow.requestAnimationFrame = this.originals.requestAnimationFrame;
+            targetWindow.cancelAnimationFrame = this.originals.cancelAnimationFrame;
 
             // Limpeza de eventos
             Object.entries(this.handlers).forEach(([k, h]) => {
