@@ -658,7 +658,7 @@
             this.refreshPlaybackState();
             const graceActive = this.state.hidden && !forceOptimization && this.gracePeriodTimer;
             if (!this.state.hidden || graceActive) this.state.throttlingLevel = 0;
-            else if (this.state.playing && this.state.visibleVideo && this.state.networkOnline) this.state.throttlingLevel = 1;
+            else if (this.state.playing && this.state.networkOnline) this.state.throttlingLevel = 1;
             else this.state.throttlingLevel = 2;
         },
         overrideTimers() {
