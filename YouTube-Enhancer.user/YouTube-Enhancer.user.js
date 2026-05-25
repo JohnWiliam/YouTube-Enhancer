@@ -1,13 +1,11 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      2.3.0
+// @version      2.3.1
 // @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts, elimina blur, adiciona relógio.
-// @author       John Wiliam & IA
+// @author       John Wiliam & IA (Refatorado Sênior)
 // @match        *://*.youtube.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=youtube.com
-// @updateURL    https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js
-// @downloadURL  https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
@@ -20,7 +18,7 @@
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = '2.3.0';
+    const SCRIPT_VERSION = '2.3.1';
     const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
     if (window[FLAG]) return;
     window[FLAG] = true;
@@ -157,10 +155,10 @@
     };
 
     const ConfigManager = {
-        CONFIG_VERSION: '2.3.0',
+        CONFIG_VERSION: '2.3.1',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
-            version: '2.3.0', LANGUAGE: 'pt', VIDEOS_PER_ROW: 4,
+            version: '2.3.1', LANGUAGE: 'pt', VIDEOS_PER_ROW: 4,
             FEATURES: { CPU_TAMER: true, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true, RTX_VISUAL_MODE: true },
             CLOCK_STYLE: { color: '#ffffff', bgColor: '#191919', bgOpacity: 0.3, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
@@ -191,12 +189,8 @@
                 .then((opened) => {
                     if (!opened) console.warn(`[YT Enhancer] Falha ao abrir modal de configurações (source=${source}).`);
                 })
-                .catch((error) => {
-                    console.error(`[YT Enhancer] Exceção ao abrir configurações (source=${source}).`, error);
-                })
-                .finally(() => {
-                    this.opening = false;
-                });
+                .catch((error) => console.error(`[YT Enhancer] Exceção ao abrir configurações.`, error))
+                .finally(() => this.opening = false);
         },
         registerMenuCommand() {
             if (this.menuRegistered || typeof GM_registerMenuCommand !== 'function') return;
@@ -206,18 +200,12 @@
             const label = t('menu.openSettings', lang);
             const callback = () => this.open('menu');
 
-            try {
-                GM_registerMenuCommand(label, callback, { id: 'yt-enhancer-settings-cmd', autoClose: true });
-            } catch (error) {
-                try {
-                    GM_registerMenuCommand(label, callback);
-                } catch (fallbackError) {}
-            }
+            try { GM_registerMenuCommand(label, callback, { id: 'yt-enhancer-settings-cmd', autoClose: true }); } 
+            catch (error) { try { GM_registerMenuCommand(label, callback); } catch (e) {} }
         },
-        registerFallbackApi() {
-            try {
-                targetWindow.YT_ENHANCER_OPEN_SETTINGS = () => this.open('window_api');
-            } catch (error) {}
+        registerSafeApi() {
+            // Escuta a requisições de outras partes/páginas de maneira isolada e segura
+            window.addEventListener('yt-enhancer-open-settings', () => this.open('event_api'));
         }
     };
 
@@ -225,15 +213,11 @@
     // 2. UI MANAGER (Modal Blindado)
     // =======================================================
     const UIManager = {
-        cleanupFunctions: [],
-        styleId: 'yt-enhancer-modal-style',
-        styleFallbackLogCode: 'UI_MODAL_STYLE_FALLBACK',
-
-        applyModalInlineFallback(modalElement, reason = 'unknown') {
+        cleanupFunctions: [], styleId: 'yt-enhancer-modal-style',
+        applyModalInlineFallback(modalElement) {
             if (!modalElement) return;
             modalElement.style.cssText = 'position: fixed !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) !important; background: #121212 !important; color: #f1f1f1 !important; z-index: 2147483647 !important;';
         },
-
         ensureRootReady(maxAttempts = 60, interval = 50) {
             return new Promise((resolve) => {
                 let attempts = 0;
@@ -246,7 +230,6 @@
                 check();
             });
         },
-
         async openSettings(onSave) {
             const config = ConfigManager.load();
             const rootReady = await this.ensureRootReady();
@@ -279,7 +262,7 @@
             overlay.style.cssText = 'position: fixed !important; inset: 0 !important; background: rgba(0,0,0,0.75) !important; z-index: 2147483646 !important; pointer-events: auto !important;';
 
             const modal = create('div', { id: 'yt-enhancer-settings-modal', className: 'yt-enhancer-modal' });
-            if (!stylesInjected) this.applyModalInlineFallback(modal, 'injectCSS_failed');
+            if (!stylesInjected) this.applyModalInlineFallback(modal);
 
             const modalHeader = create('div', { className: 'modal-header' });
             modalHeader.append(
@@ -491,7 +474,11 @@
     // =======================================================
     const StyleManager = {
         styleId: 'yt-enhancer-styles',
-        init() { EventBus.on('configChanged', (config) => this.apply(config)); },
+        init() {
+            EventBus.on('configChanged', (config) => this.apply(config));
+            // Garante que o YT não apague o estilo após a navegação SPA
+            document.addEventListener('yt-navigate-finish', () => this.apply(ConfigManager.load()));
+        },
         apply(config) {
             let css = '';
             if (config.FEATURES.LAYOUT_ENHANCEMENT) {
@@ -517,7 +504,7 @@
     // =======================================================
     const ShortsManager = {
         observer: null, listenersCleanup: [], hiddenElements: new Set(), enabled: false,
-        debouncedPrune: Utils.debounce(function() { if (this.enabled) this.prune(); }, 150),
+        debouncedPrune: Utils.debounce(function() { if (this.enabled) this.prune(); }, 250),
         init(config) { this.updateConfig(config); EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig)); },
         updateConfig(config) {
             const shouldEnable = Boolean(config?.FEATURES?.SHORTS_REMOVAL);
@@ -530,7 +517,10 @@
             this.prune();
             if (!this.observer) {
                 this.observer = new MutationObserver(() => this.debouncedPrune());
-                this.observer.observe(document.documentElement, { childList: true, subtree: true });
+                // Observer focado evita gargalo em rolagem
+                const targetNode = document.querySelector('ytd-app') || document.body;
+                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
+                this.observer.observe(targetNode, { childList: true, subtree: true });
             }
             if (this.listenersCleanup.length === 0) {
                 this.listenersCleanup.push(Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()), Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()), Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune()));
@@ -568,7 +558,7 @@
     };
 
     // =======================================================
-    // 4. SMART CPU TAMER (Refatorado - Resolução de Bugs)
+    // 4. SMART CPU TAMER (Totalmente blindado e livre de Erros Críticos)
     // =======================================================
     const SmartCpuTamer = {
         initialized: false,
@@ -581,7 +571,6 @@
 
         init() {
             if (this.initialized) return;
-            // Salva as funções originais nativas
             this.originals.setInterval = targetWindow.setInterval;
             this.originals.setTimeout = targetWindow.setTimeout;
             this.originals.requestAnimationFrame = targetWindow.requestAnimationFrame;
@@ -596,14 +585,11 @@
         cleanup() {
             if (!this.initialized) return;
             
-            // CORREÇÃO 1: Restauração direta e limpa das funções nativas.
-            // Não usamos exportFunction aqui, pois as funções originais já pertencem ao contexto da página.
             targetWindow.setInterval = this.originals.setInterval;
             targetWindow.setTimeout = this.originals.setTimeout;
             targetWindow.requestAnimationFrame = this.originals.requestAnimationFrame;
             targetWindow.cancelAnimationFrame = this.originals.cancelAnimationFrame;
 
-            // Limpeza de eventos
             Object.entries(this.handlers).forEach(([k, h]) => {
                 if (!h) return;
                 const eventName = k === 'visibility' ? 'visibilitychange' : k;
@@ -615,7 +601,6 @@
             });
             this.handlers = { visibility: null, play: null, pause: null, ended: null, pagehide: null, pageshow: null, freeze: null, resume: null, online: null, offline: null };
             
-            // Limpeza de timers
             if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
             this.rafFallbackTimers.forEach(id => clearTimeout(id));
             this.rafFallbackTimers.clear();
@@ -628,13 +613,14 @@
         },
         
         resolveMainMediaElement(force = false) {
+            // Otimização Sênior: evita QuerySelector se o elemento ainda existe no DOM
             if (!force && this.mainMediaElement?.isConnected) return this.mainMediaElement;
-            this.mainMediaElement = Utils.DOMCache.get('#movie_player video.html5-main-video', true) || Utils.DOMCache.get('.html5-video-player video.html5-main-video', true) || Utils.DOMCache.get('#movie_player video', true) || null;
+            this.mainMediaElement = Utils.DOMCache.get('#movie_player video.html5-main-video', force) || Utils.DOMCache.get('.html5-video-player video.html5-main-video', force) || Utils.DOMCache.get('#movie_player video', force) || null;
             return this.mainMediaElement;
         },
         
         refreshPlaybackState() {
-            const media = this.resolveMainMediaElement(true);
+            const media = this.resolveMainMediaElement(false); // Retira o "true" forçado constante
             this.state.playing = !!(media && !media.paused && !media.ended && media.readyState > 2);
             this.state.visibleVideo = !!(media && media.isConnected && media.getClientRects().length > 0);
         },
@@ -672,7 +658,7 @@
             window.addEventListener('online', this.handlers.online, true);
             window.addEventListener('offline', this.handlers.offline, true);
 
-            this.mediaStatePoller = this.originals.setInterval.call(targetWindow, () => this.updateState(), 1250);
+            this.mediaStatePoller = this.originals.setInterval.call(targetWindow, () => this.updateState(), 2000);
             this.state.hidden = document.visibilityState === 'hidden';
             this.state.networkOnline = navigator.onLine !== false;
             this.refreshPlaybackState();
@@ -690,33 +676,30 @@
             const self = this;
             const norm = (d) => Number.isFinite(Number(d)) ? Number(d) : 0;
             
-            // CORREÇÃO 2: Utilidade isolada apenas onde é necessária (evita repetição de código)
             const applyOverride = (name, customFunc) => {
-                try {
-                    if (typeof exportFunction === 'function') {
-                        exportFunction(customFunc, targetWindow, { defineAs: name });
-                    } else {
-                        targetWindow[name] = customFunc;
-                    }
-                } catch (e) {}
+                try { targetWindow[name] = customFunc; } catch (e) {}
             };
 
             applyOverride('setInterval', function(callback, delay, ...args) {
                 let d = norm(delay);
-                if (self.state.throttlingLevel === 2) d = Math.max(d, 4000);
-                else if (self.state.throttlingLevel === 1) d = Math.max(d, 800);
+                // Evitamos limites insanos (como 4000) que crasham a aba (XHR Heartbeat do YT morria)
+                if (self.state.throttlingLevel === 2) d = Math.max(d, 2000);
+                else if (self.state.throttlingLevel === 1) d = Math.max(d, 1000);
                 return self.originals.setInterval.apply(targetWindow, [callback, d, ...args]);
             });
 
             applyOverride('setTimeout', function(callback, delay, ...args) {
                 let d = norm(delay);
-                if (self.state.throttlingLevel === 2) d = Math.max(d, 1200);
-                else if (self.state.throttlingLevel === 1) d = Math.max(d, 180);
+                // setTimeout deve ser throttled muito suavemente
+                if (self.state.throttlingLevel === 2) d = Math.max(d, 500);
                 return self.originals.setTimeout.apply(targetWindow, [callback, d, ...args]);
             });
 
+            // Erro fatal de escopo corrigido: A declaração `requestAnimationFrame` que faltava
+            applyOverride('requestAnimationFrame', function(callback) {
+                if (self.state.throttlingLevel > 0) {
                     const id = 1000000 + ++self.rafFallbackId;
-                    const d = self.state.throttlingLevel === 1 ? 42 : 1000;
+                    const d = self.state.throttlingLevel === 1 ? 33 : 250;
                     
                     const tid = self.originals.setTimeout.apply(targetWindow, [() => {
                         self.rafFallbackTimers.delete(id);
@@ -760,7 +743,7 @@
         resolvePlayerElement(force = false) {
             const current = this.playerElement;
             if (!force && current?.isConnected) return current;
-            const player = Utils.DOMCache.get('#movie_player', true) || Utils.DOMCache.get('.html5-video-player', true);
+            const player = Utils.DOMCache.get('#movie_player', force) || Utils.DOMCache.get('.html5-video-player', force);
             if (player !== current) {
                 if (this.observer) { this.observer.disconnect(); this.observer = null; }
                 this.playerElement = player || null;
@@ -857,7 +840,7 @@
                     }
                 }, { capture: true });
 
-                SettingsLauncher.registerFallbackApi();
+                SettingsLauncher.registerSafeApi();
 
                 try { if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init(); } catch (e) {}
                 try { StyleManager.init(); StyleManager.apply(config); } catch (e) {}
