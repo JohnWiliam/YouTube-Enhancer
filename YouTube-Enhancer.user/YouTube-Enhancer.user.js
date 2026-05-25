@@ -519,6 +519,7 @@
                 this.observer = new MutationObserver(() => this.debouncedPrune());
                 // Observer focado evita gargalo em rolagem
                 const targetNode = document.querySelector('ytd-app') || document.body;
+                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
                 this.observer.observe(targetNode, { childList: true, subtree: true });
             }
             if (this.listenersCleanup.length === 0) {
