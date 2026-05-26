@@ -3,7 +3,7 @@
 // @namespace    Violentmonkey Scripts
 // @version      2.3.1
 // @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts, elimina blur, adiciona relógio.
-// @author       John Wiliam & IA (Refatorado Sênior)
+// @author       John Wiliam & IA
 // @match        *://*.youtube.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=youtube.com
 // @updateURL    https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js
