@@ -20,13 +20,17 @@
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = '2.3.1';
+    const SCRIPT_VERSION = '2.4.0';
     const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
     if (window[FLAG]) return;
     window[FLAG] = true;
 
     const targetWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
     const log = (msg) => console.log(`[YT Enhancer] ${msg}`);
+
+    const Constants = {
+        CONFIG_VERSION: '2.4.0'
+    };
 
     // =======================================================
     // EVENT BUS SYSTEM
@@ -49,6 +53,9 @@
             [...this.events.get(event)].forEach(callback => {
                 try { callback(data); } catch (e) { console.error(`EventBus error [${event}]:`, e); }
             });
+        },
+        clear() {
+            this.events.clear();
         }
     };
 
@@ -130,6 +137,7 @@
                 if (!styleEl && id) styleEl = document.getElementById(id);
                 return Boolean(styleEl && styleEl.isConnected);
             } catch (error) {
+                console.error('[YT Enhancer] injectCSS falhou:', error);
                 return false;
             }
         }
@@ -157,11 +165,11 @@
     };
 
     const ConfigManager = {
-        CONFIG_VERSION: '2.3.1',
+        CONFIG_VERSION: Constants.CONFIG_VERSION,
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
-            version: '2.3.1', LANGUAGE: 'pt', VIDEOS_PER_ROW: 4,
-            FEATURES: { CPU_TAMER: true, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true, RTX_VISUAL_MODE: true },
+            version: Constants.CONFIG_VERSION, LANGUAGE: 'pt', VIDEOS_PER_ROW: 4,
+            FEATURES: { CPU_TAMER: false, CPU_TAMER_AGGRESSIVE: false, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true, RTX_VISUAL_MODE: true },
             CLOCK_STYLE: { color: '#ffffff', bgColor: '#191919', bgOpacity: 0.3, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
         load() {
@@ -203,7 +211,7 @@
             const callback = () => this.open('menu');
 
             try { GM_registerMenuCommand(label, callback, { id: 'yt-enhancer-settings-cmd', autoClose: true }); } 
-            catch (error) { try { GM_registerMenuCommand(label, callback); } catch (e) {} }
+            catch (error) { try { GM_registerMenuCommand(label, callback); } catch (e) { console.error('[YT Enhancer] menu fallback falhou:', e); } }
         },
         registerSafeApi() {
             // Escuta a requisições de outras partes/páginas de maneira isolada e segura
@@ -389,7 +397,7 @@
 
             const getNewConfig = () => Utils.sanitizeConfig({
                 LANGUAGE: document.getElementById('cfg-language').value,
-                VIDEOS_PER_ROW: parseInt(document.getElementById('cfg-videos-row').value, 10) || 5,
+                VIDEOS_PER_ROW: parseInt(document.getElementById('cfg-videos-row').value, 10) || ConfigManager.defaults.VIDEOS_PER_ROW,
                 FEATURES: {
                     CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
                     LAYOUT_ENHANCEMENT: document.getElementById('cfg-layout').checked,
@@ -491,8 +499,7 @@
             }
             if (config.FEATURES.RTX_VISUAL_MODE) {
                 css += `
-                    *, :before, :after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-                    ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-guide-renderer { background: transparent !important; background-color: transparent !important; }
+                                        ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-guide-renderer { background: transparent !important; background-color: transparent !important; }
                     tp-yt-paper-dialog, ytd-multi-page-menu-renderer, tp-yt-iron-dropdown, ytd-popup-container tp-yt-paper-dialog, ytd-account-menu { background: var(--yt-spec-base-background, #0f0f0f) !important; background-color: var(--yt-spec-base-background, #0f0f0f) !important; }
                     .ytp-settings-menu, .ytp-panel, .ytp-panel-menu, .ytp-popup.ytp-contextmenu { background: rgba(15, 15, 15, 0.95) !important; background-color: rgba(15, 15, 15, 0.95) !important; text-shadow: none !important; }
                 `;
@@ -521,7 +528,7 @@
                 this.observer = new MutationObserver(() => this.debouncedPrune());
                 // Observer focado evita gargalo em rolagem
                 const targetNode = document.querySelector('ytd-app') || document.body;
-                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
+                if (!targetNode) return;
                 this.observer.observe(targetNode, { childList: true, subtree: true });
             }
             if (this.listenersCleanup.length === 0) {
@@ -553,7 +560,8 @@
             document.querySelectorAll('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach(n => { hide.add(n); const s = n.closest('ytd-rich-section-renderer'); if(s) hide.add(s); });
             document.querySelectorAll('ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach(m => { const c = m.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-item-section-renderer'); if(c) hide.add(c); });
             document.querySelectorAll('a[href^="/shorts"], a[href*="/shorts/"], a[title="Shorts"], [aria-label="Shorts"]').forEach(l => { const e = l.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item'); if(e) hide.add(e); });
-            document.querySelectorAll('ytd-reel-item-renderer, ytd-rich-item-renderer:has(a[href^="/shorts/"])').forEach(i => hide.add(i));
+            document.querySelectorAll('ytd-reel-item-renderer').forEach(i => hide.add(i));
+            document.querySelectorAll('a[href^="/shorts/"]').forEach((link) => { const shortItem = link.closest('ytd-rich-item-renderer, ytd-video-renderer'); if (shortItem) hide.add(shortItem); });
             hide.forEach(el => this.markHidden(el));
         },
         cleanup() { this.stop(); }
@@ -817,6 +825,7 @@
             if (this.timeInterval) clearInterval(this.timeInterval);
             if (this.fullscreenHandler) document.removeEventListener('fullscreenchange', this.fullscreenHandler);
             if (this.navigationHandler) document.removeEventListener('yt-navigate-finish', this.navigationHandler);
+            if (this.clockElement) { this.clockElement.remove(); this.clockElement = null; }
             this.observer = null; this.playerElement = null; this.fullscreenHandler = null; this.navigationHandler = null;
         }
     };
@@ -844,16 +853,16 @@
 
                 SettingsLauncher.registerSafeApi();
 
-                try { if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init(); } catch (e) {}
-                try { StyleManager.init(); StyleManager.apply(config); } catch (e) {}
-                try { ShortsManager.init(config); } catch (e) {}
-                try { ClockManager.init(config); } catch (e) {}
+                try { if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init(); } catch (e) { console.error('[YT Enhancer] SmartCpuTamer init:', e); }
+                try { StyleManager.init(); StyleManager.apply(config); } catch (e) { console.error('[YT Enhancer] StyleManager init:', e); }
+                try { ShortsManager.init(config); } catch (e) { console.error('[YT Enhancer] ShortsManager init:', e); }
+                try { ClockManager.init(config); } catch (e) { console.error('[YT Enhancer] ClockManager init:', e); }
                 
                 EventBus.on('configChanged', (newConfig) => {
                     try {
                         if (newConfig.FEATURES.CPU_TAMER && !SmartCpuTamer.initialized) SmartCpuTamer.init();
                         else if (!newConfig.FEATURES.CPU_TAMER && SmartCpuTamer.initialized) SmartCpuTamer.cleanup();
-                    } catch(e) {}
+                    } catch(e) { console.error('[YT Enhancer] configChanged:', e); }
                 });
                 
                 Utils.safeAddEventListener(window, 'beforeunload', () => {
@@ -861,7 +870,7 @@
                 });
 
                 log(`v${ConfigManager.CONFIG_VERSION} Iniciado com sucesso.`);
-            } catch (error) {}
+            } catch (error) { console.error('[YT Enhancer] init falhou:', error); }
         }
     };
 
@@ -884,7 +893,7 @@
             const hostnameAllowed = location.hostname === 'www.youtube.com';
             const contextVisible = document.visibilityState !== 'hidden';
             let isTopFrame = false;
-            try { isTopFrame = window === window.top; } catch (error) {}
+            try { isTopFrame = window === window.top; } catch (error) { console.warn('[YT Enhancer] Não foi possível validar top frame:', error); }
             const shouldInit = isTopFrame || (hostnameAllowed && contextVisible);
             return { shouldInit };
         }
