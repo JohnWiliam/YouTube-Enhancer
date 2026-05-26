@@ -2,34 +2,64 @@
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
 // @version      2.3.1
-// @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts, elimina blur, adiciona relógio.
-// @author       John Wiliam & IA (Refatorado Sênior)
-// @match        *://*.youtube.com/*
+// @description  Reduz uso de CPU, personaliza layout, remove Shorts de forma incremental, adiciona relógio e modo RTX. (Refatorado - Alta Estabilidade)
+// @author       John Wiliam & IA
+// @match        *://www.youtube.com/*
+// @noframes
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=youtube.com
 // @updateURL    https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js
 // @downloadURL  https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
-// @grant        GM_addStyle
-// @grant        GM_addElement
-// @grant        unsafeWindow
 // @run-at       document-start
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = '2.3.1';
-    const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
-    if (window[FLAG]) return;
-    window[FLAG] = true;
+    /**
+     * @typedef {Object} EnhancerConfig
+     * @property {string} version
+     * @property {string} LANGUAGE
+     * @property {number} VIDEOS_PER_ROW
+     * @property {Object} FEATURES
+     * @property {Object} CLOCK_STYLE
+     */
 
-    const targetWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
-    const log = (msg) => console.log(`[YT Enhancer] ${msg}`);
+    const CONSTANTS = {
+        SCRIPT_VERSION: '2.3.1',
+        FLAG: '__yt_enhancer_initialized__',
+        STORAGE_KEY: 'YT_ENHANCER_CONFIG',
+        UI_ZINDEX: 99999,
+        GRACE_PERIOD_MS: 5000, // Tempo de espera antes do throttling
+        LIMITS: {
+            videosPerRow: { min: 3, max: 8, def: 4 },
+            fontSize: { min: 12, max: 48, def: 22 },
+            margin: { min: 0, max: 120, def: 30 },
+            borderRadius: { min: 0, max: 50, def: 25 },
+            bgOpacity: { min: 0, max: 1, def: 0.3 }
+        }
+    };
+
+    if (window[CONSTANTS.FLAG]) return;
+    window[CONSTANTS.FLAG] = true;
+
+    // Isolar o acesso ao contexto, evitamos unsafeWindow a menos que crítico.
+    const targetWindow = window;
 
     // =======================================================
-    // EVENT BUS SYSTEM
+    // LOG & DEBUG
+    // =======================================================
+    const Logger = {
+        level: 'info', // debug, info, warn, error
+        log(msg, ...args) { if (['debug', 'info'].includes(this.level)) console.log(`[YT Enhancer] ${msg}`, ...args); },
+        warn(msg, ...args) { if (['debug', 'info', 'warn'].includes(this.level)) console.warn(`[YT Enhancer] ⚠️ ${msg}`, ...args); },
+        error(msg, ...args) { console.error(`[YT Enhancer] ❌ ${msg}`, ...args); }
+    };
+
+    // =======================================================
+    // EVENT BUS SYSTEM (Aprimorado com ciclo de vida e cleanup)
     // =======================================================
     const EventBus = {
         events: new Map(),
@@ -47,8 +77,11 @@
         emit(event, data) {
             if (!this.events.has(event)) return;
             [...this.events.get(event)].forEach(callback => {
-                try { callback(data); } catch (e) { console.error(`EventBus error [${event}]:`, e); }
+                try { callback(data); } catch (e) { Logger.error(`EventBus emit [${event}]:`, e); }
             });
+        },
+        clear() {
+            this.events.clear();
         }
     };
 
@@ -61,17 +94,9 @@
             return Number.isFinite(num) ? Math.min(max, Math.max(min, num)) : fallback;
         },
         isHexColor(value) { return typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value); },
-        sanitizeConfig(config, defaults) {
-            const safe = { ...defaults, ...(config || {}), FEATURES: { ...defaults.FEATURES, ...(config?.FEATURES || {}) }, CLOCK_STYLE: { ...defaults.CLOCK_STYLE, ...(config?.CLOCK_STYLE || {}) } };
-            safe.LANGUAGE = ['pt', 'en'].includes(safe.LANGUAGE) ? safe.LANGUAGE : defaults.LANGUAGE;
-            safe.VIDEOS_PER_ROW = this.clamp(safe.VIDEOS_PER_ROW, 3, 8, defaults.VIDEOS_PER_ROW);
-            safe.CLOCK_STYLE.bgOpacity = this.clamp(safe.CLOCK_STYLE.bgOpacity, 0, 1, defaults.CLOCK_STYLE.bgOpacity);
-            safe.CLOCK_STYLE.fontSize = this.clamp(safe.CLOCK_STYLE.fontSize, 12, 48, defaults.CLOCK_STYLE.fontSize);
-            safe.CLOCK_STYLE.margin = this.clamp(safe.CLOCK_STYLE.margin, 0, 120, defaults.CLOCK_STYLE.margin);
-            safe.CLOCK_STYLE.borderRadius = this.clamp(safe.CLOCK_STYLE.borderRadius, 0, 50, defaults.CLOCK_STYLE.borderRadius);
-            safe.CLOCK_STYLE.color = this.isHexColor(safe.CLOCK_STYLE.color) ? safe.CLOCK_STYLE.color : defaults.CLOCK_STYLE.color;
-            safe.CLOCK_STYLE.bgColor = this.isHexColor(safe.CLOCK_STYLE.bgColor) ? safe.CLOCK_STYLE.bgColor : defaults.CLOCK_STYLE.bgColor;
-            return safe;
+        hexToRgb(hex) {
+            const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return r ? `${parseInt(r[1], 16)},${parseInt(r[2], 16)},${parseInt(r[3], 16)}` : '0,0,0';
         },
         debounce(func, wait) {
             let timeout;
@@ -84,8 +109,8 @@
             cache: new Map(),
             get(selector, force = false) {
                 if (!force && this.cache.has(selector)) {
-                    const el = this.cache.get(selector);
-                    if (el && el.isConnected) return el;
+                    const cached = this.cache.get(selector);
+                    if (cached && cached.isConnected) return cached;
                     this.cache.delete(selector);
                 }
                 const el = document.querySelector(selector);
@@ -96,40 +121,23 @@
         },
         safeAddEventListener(element, event, handler, options = {}) {
             if (!element) return () => {};
-            const safeHandler = (e) => { try { return handler(e); } catch (err) { console.error(`[Event] ${event}:`, err); } };
+            const safeHandler = (e) => { try { return handler(e); } catch (err) { Logger.error(`[Event] ${event}:`, err); } };
             element.addEventListener(event, safeHandler, options);
-            return () => element.removeEventListener(event, safeHandler, options);
-        },
-        migrateConfig(savedConfig, currentVersion) {
-            if (!savedConfig || typeof savedConfig !== 'object') return null;
-            if (!savedConfig.version) {
-                savedConfig.version = '1.0.0';
-                if (!savedConfig.CLOCK_STYLE?.borderRadius) savedConfig.CLOCK_STYLE = { ...savedConfig.CLOCK_STYLE, borderRadius: 12 };
-            }
-            savedConfig.version = currentVersion;
-            return savedConfig;
+            return () => { if (element) element.removeEventListener(event, safeHandler, options); };
         },
         injectCSS(css, id) {
             try {
                 const old = document.getElementById(id);
                 if (old) old.remove();
 
-                let styleEl = null;
-                if (typeof GM_addStyle === 'function') {
-                    styleEl = GM_addStyle(css) || null;
-                    if (styleEl && id) styleEl.id = id;
-                } else if (typeof GM_addElement === 'function') {
-                    styleEl = GM_addElement('style', { id, textContent: css }) || null;
-                } else {
-                    styleEl = document.createElement('style');
-                    styleEl.id = id;
-                    styleEl.textContent = css;
-                    (document.head || document.documentElement).appendChild(styleEl);
-                }
+                const styleEl = document.createElement('style');
+                styleEl.id = id;
+                styleEl.textContent = css;
+                (document.head || document.documentElement).appendChild(styleEl);
 
-                if (!styleEl && id) styleEl = document.getElementById(id);
-                return Boolean(styleEl && styleEl.isConnected);
+                return Boolean(styleEl.isConnected);
             } catch (error) {
+                Logger.error('Erro ao injetar CSS manual:', error);
                 return false;
             }
         }
@@ -140,47 +148,62 @@
     // =======================================================
     const I18N = {
         pt: {
-            modal: { title: '⚙️ Configurações', closeTitle: 'Fechar', tabs: { features: '🔧 Funcionalidades', appearance: '🎨 Aparência do relógio' }, features: { cpuTamer: { title: 'Redução Inteligente de CPU', description: 'Otimiza quando oculto (economiza bateria)' }, layout: { title: 'Layout Grid', description: 'Ajusta vídeos por linha' }, videosPerRow: 'Vídeos por linha', videosPerRowHint: 'Define quantos vídeos aparecem', shorts: { title: 'Remover Shorts', description: 'Limpa Shorts da interface' }, clock: { title: 'Relógio Flutuante', description: 'Mostra hora sobre o vídeo' }, rtx: { title: 'Modo RTX (sem blur)', description: 'Fundos translúcidos ficam transparentes' }, language: { title: 'Idioma da Interface', description: 'Troca textos entre PT e EN' } }, clockStyle: { textColor: 'Cor do Texto', backgroundColor: 'Cor do Fundo', backgroundOpacity: 'Opacidade Fundo', fontSize: 'Tamanho Fonte (px)', margin: 'Margem (px)', borderRadius: 'Arredondamento (px)' }, buttons: { apply: 'Aplicar', applyAndReload: 'Aplicar e Recarregar' }, reloadNotice: 'Idioma e CPU exigem recarregar a página.' },
-            menu: { openSettings: '⚙️ Configurações' }
+            modal: { title: '⚙️ Configurações', closeTitle: 'Fechar', tabs: { features: '🔧 Funcionalidades', appearance: '🎨 Relógio' }, features: { cpuTamer: { title: 'Redução Inteligente de CPU', description: 'Otimiza abas inativas' }, layout: { title: 'Layout Grid', description: 'Ajusta vídeos por linha' }, videosPerRow: 'Vídeos', videosPerRowHint: 'Quantidade por linha', shorts: { title: 'Remover Shorts', description: 'Oculta curtas da interface' }, clock: { title: 'Relógio Flutuante', description: 'Visível em Tela Cheia' }, rtx: { title: 'Modo RTX', description: 'Oculta blur de menus nativos' }, language: { title: 'Idioma', description: 'Interface' } }, clockStyle: { textColor: 'Cor', backgroundColor: 'Fundo', backgroundOpacity: 'Opacidade', fontSize: 'Tamanho (px)', margin: 'Margem (px)', borderRadius: 'Raio (px)' }, buttons: { apply: 'Aplicar', applyAndReload: 'Aplicar e Recarregar' }, reloadNotice: 'Aviso: Alterações podem exigir reload.' },
+            menu: { openSettings: '⚙️ Configurações (Enhancer)' }
         },
         en: {
-            modal: { title: '⚙️ Settings', closeTitle: 'Close', tabs: { features: '🔧 Features', appearance: '🎨 Clock appearance' }, features: { cpuTamer: { title: 'Smart CPU Reduction', description: 'Optimizes when hidden (saves battery)' }, layout: { title: 'Grid Layout', description: 'Adjusts videos per row' }, videosPerRow: 'Videos per row', videosPerRowHint: 'Defines videos in each row', shorts: { title: 'Remove Shorts', description: 'Cleans Shorts from UI' }, clock: { title: 'Floating Clock', description: 'Shows time over the video' }, rtx: { title: 'RTX Mode (no blur)', description: 'Turns translucent backgrounds transparent' }, language: { title: 'Interface Language', description: 'Switch texts between EN and PT' } }, clockStyle: { textColor: 'Text Color', backgroundColor: 'Background Color', backgroundOpacity: 'Background Opacity', fontSize: 'Font Size (px)', margin: 'Margin (px)', borderRadius: 'Roundness (px)' }, buttons: { apply: 'Apply', applyAndReload: 'Apply and Reload' }, reloadNotice: 'Language and CPU require reloading.' },
-            menu: { openSettings: '⚙️ Settings' }
+            modal: { title: '⚙️ Settings', closeTitle: 'Close', tabs: { features: '🔧 Features', appearance: '🎨 Clock' }, features: { cpuTamer: { title: 'Smart CPU Reduction', description: 'Optimizes inactive tabs' }, layout: { title: 'Grid Layout', description: 'Adjusts videos per row' }, videosPerRow: 'Videos', videosPerRowHint: 'Amount per row', shorts: { title: 'Remove Shorts', description: 'Hides shorts from UI' }, clock: { title: 'Floating Clock', description: 'Visible in Fullscreen' }, rtx: { title: 'RTX Mode', description: 'Hides native menu blurs' }, language: { title: 'Language', description: 'Interface' } }, clockStyle: { textColor: 'Color', backgroundColor: 'Background', backgroundOpacity: 'Opacity', fontSize: 'Size (px)', margin: 'Margin (px)', borderRadius: 'Radius (px)' }, buttons: { apply: 'Apply', applyAndReload: 'Apply & Reload' }, reloadNotice: 'Notice: Changes might require reload.' },
+            menu: { openSettings: '⚙️ Settings (Enhancer)' }
         }
     };
 
-    const t = (key, lang = null) => {
-        const resolvedLang = (lang || ConfigManager.load()?.LANGUAGE || 'en').toLowerCase();
+    const t = (key, configLang = 'en') => {
+        const resolvedLang = (configLang).toLowerCase();
         const segments = key.split('.');
         const getValue = (dictionary) => segments.reduce((acc, segment) => acc?.[segment], dictionary);
-        return getValue(I18N[resolvedLang]) ?? getValue(I18N.en) ?? getValue(I18N.pt) ?? key;
+        return getValue(I18N[resolvedLang]) ?? getValue(I18N.en) ?? key;
     };
 
     const ConfigManager = {
-        CONFIG_VERSION: '2.3.1',
-        STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
-            version: '2.3.1', LANGUAGE: 'pt', VIDEOS_PER_ROW: 4,
+            version: CONSTANTS.SCRIPT_VERSION, LANGUAGE: 'pt', VIDEOS_PER_ROW: CONSTANTS.LIMITS.videosPerRow.def,
             FEATURES: { CPU_TAMER: true, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true, RTX_VISUAL_MODE: true },
-            CLOCK_STYLE: { color: '#ffffff', bgColor: '#191919', bgOpacity: 0.3, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
+            CLOCK_STYLE: { color: '#ffffff', bgColor: '#191919', bgOpacity: CONSTANTS.LIMITS.bgOpacity.def, fontSize: CONSTANTS.LIMITS.fontSize.def, margin: CONSTANTS.LIMITS.margin.def, borderRadius: CONSTANTS.LIMITS.borderRadius.def, position: 'bottom-right' }
+        },
+        sanitizeConfig(config) {
+            const lim = CONSTANTS.LIMITS;
+            const safe = { ...this.defaults, ...(config || {}), FEATURES: { ...this.defaults.FEATURES, ...(config?.FEATURES || {}) }, CLOCK_STYLE: { ...this.defaults.CLOCK_STYLE, ...(config?.CLOCK_STYLE || {}) } };
+            safe.LANGUAGE = ['pt', 'en'].includes(safe.LANGUAGE) ? safe.LANGUAGE : this.defaults.LANGUAGE;
+            safe.VIDEOS_PER_ROW = Utils.clamp(safe.VIDEOS_PER_ROW, lim.videosPerRow.min, lim.videosPerRow.max, lim.videosPerRow.def);
+            safe.CLOCK_STYLE.bgOpacity = Utils.clamp(safe.CLOCK_STYLE.bgOpacity, lim.bgOpacity.min, lim.bgOpacity.max, lim.bgOpacity.def);
+            safe.CLOCK_STYLE.fontSize = Utils.clamp(safe.CLOCK_STYLE.fontSize, lim.fontSize.min, lim.fontSize.max, lim.fontSize.def);
+            safe.CLOCK_STYLE.margin = Utils.clamp(safe.CLOCK_STYLE.margin, lim.margin.min, lim.margin.max, lim.margin.def);
+            safe.CLOCK_STYLE.borderRadius = Utils.clamp(safe.CLOCK_STYLE.borderRadius, lim.borderRadius.min, lim.borderRadius.max, lim.borderRadius.def);
+            safe.CLOCK_STYLE.color = Utils.isHexColor(safe.CLOCK_STYLE.color) ? safe.CLOCK_STYLE.color : this.defaults.CLOCK_STYLE.color;
+            safe.CLOCK_STYLE.bgColor = Utils.isHexColor(safe.CLOCK_STYLE.bgColor) ? safe.CLOCK_STYLE.bgColor : this.defaults.CLOCK_STYLE.bgColor;
+            return safe;
+        },
+        migrate(saved) {
+            if (!saved || typeof saved !== 'object') return this.defaults;
+            return this.sanitizeConfig(saved);
         },
         load() {
-            try {
-                const saved = GM_getValue(this.STORAGE_KEY);
-                return Utils.sanitizeConfig(Utils.migrateConfig(saved, this.CONFIG_VERSION) || {}, this.defaults);
-            } catch (e) { return Utils.sanitizeConfig({}, this.defaults); }
+            try { return this.migrate(GM_getValue(CONSTANTS.STORAGE_KEY)); } catch (e) { return this.defaults; }
         },
         save(config) {
             try {
-                const sanitized = Utils.sanitizeConfig(config, this.defaults);
-                sanitized.version = this.CONFIG_VERSION;
-                GM_setValue(this.STORAGE_KEY, sanitized);
+                const sanitized = this.sanitizeConfig(config);
+                sanitized.version = CONSTANTS.SCRIPT_VERSION;
+                GM_setValue(CONSTANTS.STORAGE_KEY, sanitized);
                 EventBus.emit('configChanged', sanitized);
                 return true;
             } catch (e) { return false; }
         }
     };
 
+    // =======================================================
+    // GM API WRAPPER / MENU COMMAND
+    // =======================================================
     const SettingsLauncher = {
         menuRegistered: false,
         opening: false,
@@ -188,286 +211,253 @@
             if (this.opening) return;
             this.opening = true;
             Promise.resolve(UIManager.openSettings((newConfig) => ConfigManager.save(newConfig)))
-                .then((opened) => {
-                    if (!opened) console.warn(`[YT Enhancer] Falha ao abrir modal de configurações (source=${source}).`);
-                })
-                .catch((error) => console.error(`[YT Enhancer] Exceção ao abrir configurações.`, error))
                 .finally(() => this.opening = false);
         },
         registerMenuCommand() {
-            if (this.menuRegistered || typeof GM_registerMenuCommand !== 'function') return;
-            this.menuRegistered = true;
-
+            if (typeof GM_registerMenuCommand !== 'function') return;
             const lang = ConfigManager.load().LANGUAGE;
-            const label = t('menu.openSettings', lang);
-            const callback = () => this.open('menu');
-
-            try { GM_registerMenuCommand(label, callback, { id: 'yt-enhancer-settings-cmd', autoClose: true }); } 
-            catch (error) { try { GM_registerMenuCommand(label, callback); } catch (e) {} }
-        },
-        registerSafeApi() {
-            // Escuta a requisições de outras partes/páginas de maneira isolada e segura
-            window.addEventListener('yt-enhancer-open-settings', () => this.open('event_api'));
+            try { GM_registerMenuCommand(t('menu.openSettings', lang), () => this.open('menu'), { id: 'yt-enhancer-cmd', autoClose: true }); } catch (e) {}
         }
     };
 
     // =======================================================
-    // 2. UI MANAGER (Modal Blindado)
+    // 2. UI MANAGER (Modal Acessível e Isolado)
     // =======================================================
     const UIManager = {
         cleanupFunctions: [], styleId: 'yt-enhancer-modal-style',
-        applyModalInlineFallback(modalElement) {
-            if (!modalElement) return;
-            modalElement.style.cssText = 'position: fixed !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) !important; background: #121212 !important; color: #f1f1f1 !important; z-index: 2147483647 !important;';
-        },
-        ensureRootReady(maxAttempts = 60, interval = 50) {
+        ensureRootReady() {
             return new Promise((resolve) => {
-                let attempts = 0;
-                const check = () => {
-                    if (document.documentElement && document.body) { resolve(true); return; }
-                    attempts += 1;
-                    if (attempts >= maxAttempts) { resolve(false); return; }
-                    setTimeout(check, interval);
-                };
-                check();
+                if (document.body) return resolve(true);
+                const observer = new MutationObserver(() => {
+                    if (document.body) { observer.disconnect(); resolve(true); }
+                });
+                observer.observe(document.documentElement, { childList: true });
+                setTimeout(() => { observer.disconnect(); resolve(false); }, 3000);
             });
         },
         async openSettings(onSave) {
             const config = ConfigManager.load();
-            const rootReady = await this.ensureRootReady();
-            if (!rootReady) return false;
+            if (!(await this.ensureRootReady())) return false;
 
-            const stylesInjected = this.ensureStyles();
+            this.ensureStyles();
             this.cleanupFunctions.forEach(fn => fn());
             this.cleanupFunctions = [];
-
             document.getElementById('yt-enhancer-settings-modal')?.remove();
             document.getElementById('yt-enhancer-overlay')?.remove();
 
-            const create = (tag, options = {}) => {
+            const create = (tag, opts = {}) => {
                 const el = document.createElement(tag);
-                if (options.id) el.id = options.id;
-                if (options.className) el.className = options.className;
-                if (options.text) el.textContent = options.text;
-                if (options.type) el.type = options.type;
-                if (options.value !== undefined) el.value = options.value;
-                if (options.checked !== undefined) el.checked = !!options.checked;
-                if (options.min !== undefined) el.min = String(options.min);
-                if (options.max !== undefined) el.max = String(options.max);
-                if (options.step !== undefined) el.step = String(options.step);
-                if (options.forId) el.htmlFor = options.forId;
-                if (options.dataset) Object.assign(el.dataset, options.dataset);
+                if (opts.id) el.id = opts.id;
+                if (opts.className) el.className = opts.className;
+                if (opts.text) el.textContent = opts.text;
+                if (opts.type) el.type = opts.type;
+                if (opts.value !== undefined) el.value = opts.value;
+                if (opts.checked !== undefined) el.checked = !!opts.checked;
+                if (opts.forId) el.htmlFor = opts.forId;
+                if (opts.aria) Object.entries(opts.aria).forEach(([k, v]) => el.setAttribute(`aria-${k}`, v));
+                if (opts.title) el.title = opts.title;
+                Object.assign(el.dataset, opts.dataset || {});
                 return el;
             };
 
             const overlay = create('div', { id: 'yt-enhancer-overlay' });
-            overlay.style.cssText = 'position: fixed !important; inset: 0 !important; background: rgba(0,0,0,0.75) !important; z-index: 2147483646 !important; pointer-events: auto !important;';
+            
+            const modal = create('div', { 
+                id: 'yt-enhancer-settings-modal', 
+                className: 'yt-enhancer-modal',
+                aria: { modal: 'true', labelledby: 'yt-enhancer-title' }
+            });
+            modal.setAttribute('role', 'dialog');
+            modal.tabIndex = -1;
 
-            const modal = create('div', { id: 'yt-enhancer-settings-modal', className: 'yt-enhancer-modal' });
-            if (!stylesInjected) this.applyModalInlineFallback(modal);
-
-            const modalHeader = create('div', { className: 'modal-header' });
+            const modalHeader = create('div', { className: 'yt-enhancer-modal-header' });
             modalHeader.append(
-                create('h2', { className: 'modal-title', text: t('modal.title', config.LANGUAGE) }),
-                create('button', { id: 'yt-enhancer-close', className: 'close-btn', text: '×' })
+                create('h2', { id: 'yt-enhancer-title', text: t('modal.title', config.LANGUAGE) }),
+                create('button', { id: 'yt-enhancer-close', className: 'yt-enhancer-close-btn', text: '×', title: t('modal.closeTitle', config.LANGUAGE), aria: { label: t('modal.closeTitle', config.LANGUAGE) } })
             );
 
-            const tabsNav = create('div', { className: 'tabs-nav' });
-            const tabFeaturesBtn = create('button', { className: 'tab-btn active', text: t('modal.tabs.features', config.LANGUAGE), dataset: { target: 'tab-features' } });
-            const tabAppearanceBtn = create('button', { className: 'tab-btn', text: t('modal.tabs.appearance', config.LANGUAGE), dataset: { target: 'tab-appearance' } });
-            tabsNav.append(tabFeaturesBtn, tabAppearanceBtn);
+            const tabsNav = create('div', { className: 'yt-enhancer-tabs' });
+            const tabFeat = create('button', { className: 'yt-enhancer-tab active', text: t('modal.tabs.features', config.LANGUAGE), dataset: { target: 'tab-features' } });
+            const tabApp = create('button', { className: 'yt-enhancer-tab', text: t('modal.tabs.appearance', config.LANGUAGE), dataset: { target: 'tab-appearance' } });
+            tabsNav.append(tabFeat, tabApp);
 
-            const modalContent = create('div', { className: 'modal-content' });
-            const tabFeatures = create('div', { id: 'tab-features', className: 'tab-pane active' });
-            const optionsList = create('div', { className: 'options-list' });
-
-            const createToggle = (id, title, description, checked) => {
-                const label = create('label', { className: 'feature-toggle' });
-                const textWrap = create('div', { className: 'toggle-text' });
-                textWrap.append(create('strong', { text: title }), create('span', { text: description }));
-                const switchWrap = create('div', { className: 'toggle-switch' });
-                switchWrap.append(create('input', { id, type: 'checkbox', checked }), create('span', { className: 'slider' }));
-                label.append(textWrap, switchWrap);
-                return label;
+            const content = create('div', { className: 'yt-enhancer-content' });
+            
+            // Pane 1: Features
+            const paneFeat = create('div', { id: 'tab-features', className: 'yt-enhancer-pane active' });
+            const createToggle = (id, title, desc, checked) => {
+                const lbl = create('label', { className: 'yt-enhancer-toggle' });
+                const txt = create('div', { className: 'yt-enhancer-toggle-text' });
+                txt.append(create('strong', { text: title }), create('span', { text: desc }));
+                const sw = create('div', { className: 'yt-enhancer-switch' });
+                sw.append(create('input', { id, type: 'checkbox', checked }), create('span', { className: 'yt-enhancer-slider' }));
+                lbl.append(txt, sw);
+                return lbl;
             };
 
-            optionsList.append(
+            const lim = CONSTANTS.LIMITS;
+            paneFeat.append(
                 createToggle('cfg-cpu-tamer', t('modal.features.cpuTamer.title', config.LANGUAGE), t('modal.features.cpuTamer.description', config.LANGUAGE), config.FEATURES.CPU_TAMER),
                 createToggle('cfg-layout', t('modal.features.layout.title', config.LANGUAGE), t('modal.features.layout.description', config.LANGUAGE), config.FEATURES.LAYOUT_ENHANCEMENT)
             );
 
-            const layoutSettings = create('label', { id: 'layout-settings', className: 'feature-toggle feature-card-input', forId: 'cfg-videos-row' });
-            layoutSettings.style.display = config.FEATURES.LAYOUT_ENHANCEMENT ? 'flex' : 'none';
-            const layoutText = create('div', { className: 'toggle-text' });
-            layoutText.append(create('strong', { text: t('modal.features.videosPerRow', config.LANGUAGE) }), create('span', { text: t('modal.features.videosPerRowHint', config.LANGUAGE) }));
-            layoutSettings.append(layoutText, create('input', { id: 'cfg-videos-row', className: 'styled-input-small', type: 'number', min: 3, max: 8, value: config.VIDEOS_PER_ROW }));
-            optionsList.append(layoutSettings);
+            const laySet = create('label', { className: 'yt-enhancer-toggle', forId: 'cfg-videos-row' });
+            laySet.style.display = config.FEATURES.LAYOUT_ENHANCEMENT ? 'flex' : 'none';
+            const layTxt = create('div', { className: 'yt-enhancer-toggle-text' });
+            layTxt.append(create('strong', { text: t('modal.features.videosPerRow', config.LANGUAGE) }), create('span', { text: t('modal.features.videosPerRowHint', config.LANGUAGE) }));
+            const layInp = create('input', { id: 'cfg-videos-row', type: 'number', className: 'yt-enhancer-input-small', value: config.VIDEOS_PER_ROW });
+            layInp.min = lim.videosPerRow.min; layInp.max = lim.videosPerRow.max;
+            laySet.append(layTxt, layInp);
+            paneFeat.append(laySet);
 
-            optionsList.append(
+            paneFeat.append(
                 createToggle('cfg-shorts', t('modal.features.shorts.title', config.LANGUAGE), t('modal.features.shorts.description', config.LANGUAGE), config.FEATURES.SHORTS_REMOVAL),
-                createToggle('cfg-clock-enable', t('modal.features.clock.title', config.LANGUAGE), t('modal.features.clock.description', config.LANGUAGE), config.FEATURES.FULLSCREEN_CLOCK),
-                createToggle('cfg-rtx-visual', t('modal.features.rtx.title', config.LANGUAGE), t('modal.features.rtx.description', config.LANGUAGE), config.FEATURES.RTX_VISUAL_MODE)
+                createToggle('cfg-clock', t('modal.features.clock.title', config.LANGUAGE), t('modal.features.clock.description', config.LANGUAGE), config.FEATURES.FULLSCREEN_CLOCK),
+                createToggle('cfg-rtx', t('modal.features.rtx.title', config.LANGUAGE), t('modal.features.rtx.description', config.LANGUAGE), config.FEATURES.RTX_VISUAL_MODE)
             );
 
-            const languageCard = create('label', { className: 'feature-toggle feature-card-select', forId: 'cfg-language' });
-            const languageText = create('div', { className: 'toggle-text' });
-            languageText.append(create('strong', { text: t('modal.features.language.title', config.LANGUAGE) }), create('span', { text: t('modal.features.language.description', config.LANGUAGE) }));
-            const languageSelect = create('select', { id: 'cfg-language', className: 'styled-select' });
-            [{ value: 'en', label: 'English' }, { value: 'pt', label: 'Português' }].forEach(({ value, label }) => {
-                const option = create('option', { value, text: label });
-                if (config.LANGUAGE === value) option.selected = true;
-                languageSelect.appendChild(option);
+            const langSet = create('label', { className: 'yt-enhancer-toggle', forId: 'cfg-lang' });
+            const langTxt = create('div', { className: 'yt-enhancer-toggle-text' });
+            langTxt.append(create('strong', { text: t('modal.features.language.title', config.LANGUAGE) }), create('span', { text: t('modal.features.language.description', config.LANGUAGE) }));
+            const langSel = create('select', { id: 'cfg-lang', className: 'yt-enhancer-select' });
+            [{ v: 'en', l: 'English' }, { v: 'pt', l: 'Português' }].forEach(opt => {
+                const option = create('option', { value: opt.v, text: opt.l });
+                if (config.LANGUAGE === opt.v) option.selected = true;
+                langSel.appendChild(option);
             });
-            languageCard.append(languageText, languageSelect);
-            optionsList.append(languageCard);
-            tabFeatures.appendChild(optionsList);
+            langSet.append(langTxt, langSel);
+            paneFeat.append(langSet);
 
-            const tabAppearance = create('div', { id: 'tab-appearance', className: 'tab-pane' });
-            const appearanceGrid = create('div', { className: 'appearance-grid' });
-            const createControl = (id, labelText, inputEl, valueEl = null) => {
-                const group = create('div', { className: 'control-group' });
-                group.append(create('label', { text: labelText }));
-                if (valueEl) {
-                    const wrap = create('div', { className: 'color-input-wrapper' });
-                    wrap.append(inputEl, valueEl);
-                    group.append(wrap);
-                } else {
-                    group.append(inputEl);
-                }
-                inputEl.id = id;
-                return group;
+            // Pane 2: Appearance
+            const paneApp = create('div', { id: 'tab-appearance', className: 'yt-enhancer-pane' });
+            const appGrid = create('div', { className: 'yt-enhancer-grid' });
+            const createCtrl = (id, lbl, inp, valSpan = false) => {
+                const g = create('div', { className: 'yt-enhancer-ctrl-group' });
+                g.append(create('label', { text: lbl }));
+                if (valSpan) {
+                    const w = create('div', { className: 'yt-enhancer-color-wrap' });
+                    w.append(inp, create('span', { className: 'yt-enhancer-color-val', text: inp.value }));
+                    g.append(w);
+                } else g.append(inp);
+                return g;
             };
 
-            appearanceGrid.append(
-                createControl('style-color', t('modal.clockStyle.textColor', config.LANGUAGE), create('input', { type: 'color', value: config.CLOCK_STYLE.color }), create('span', { className: 'color-value', text: config.CLOCK_STYLE.color })),
-                createControl('style-bg-color', t('modal.clockStyle.backgroundColor', config.LANGUAGE), create('input', { type: 'color', value: config.CLOCK_STYLE.bgColor }), create('span', { className: 'color-value', text: config.CLOCK_STYLE.bgColor })),
-                createControl('style-bg-opacity', t('modal.clockStyle.backgroundOpacity', config.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 0, max: 1, step: 0.1, value: config.CLOCK_STYLE.bgOpacity })),
-                createControl('style-font-size', t('modal.clockStyle.fontSize', config.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 12, max: 100, value: config.CLOCK_STYLE.fontSize })),
-                createControl('style-margin', t('modal.clockStyle.margin', config.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 0, max: 200, value: config.CLOCK_STYLE.margin })),
-                createControl('style-border-radius', t('modal.clockStyle.borderRadius', config.LANGUAGE), create('input', { className: 'styled-input', type: 'number', min: 0, max: 50, value: config.CLOCK_STYLE.borderRadius || 12 }))
+            const inpCol = create('input', { id: 'sty-col', type: 'color', value: config.CLOCK_STYLE.color });
+            const inpBg = create('input', { id: 'sty-bg', type: 'color', value: config.CLOCK_STYLE.bgColor });
+            const inpOpa = create('input', { id: 'sty-opa', type: 'number', className: 'yt-enhancer-input', value: config.CLOCK_STYLE.bgOpacity }); inpOpa.min=lim.bgOpacity.min; inpOpa.max=lim.bgOpacity.max; inpOpa.step=0.1;
+            const inpFz = create('input', { id: 'sty-fz', type: 'number', className: 'yt-enhancer-input', value: config.CLOCK_STYLE.fontSize }); inpFz.min=lim.fontSize.min; inpFz.max=lim.fontSize.max;
+            const inpMar = create('input', { id: 'sty-mar', type: 'number', className: 'yt-enhancer-input', value: config.CLOCK_STYLE.margin }); inpMar.min=lim.margin.min; inpMar.max=lim.margin.max;
+            const inpRad = create('input', { id: 'sty-rad', type: 'number', className: 'yt-enhancer-input', value: config.CLOCK_STYLE.borderRadius }); inpRad.min=lim.borderRadius.min; inpRad.max=lim.borderRadius.max;
+
+            appGrid.append(
+                createCtrl('sty-col-g', t('modal.clockStyle.textColor', config.LANGUAGE), inpCol, true),
+                createCtrl('sty-bg-g', t('modal.clockStyle.backgroundColor', config.LANGUAGE), inpBg, true),
+                createCtrl('sty-opa-g', t('modal.clockStyle.backgroundOpacity', config.LANGUAGE), inpOpa),
+                createCtrl('sty-fz-g', t('modal.clockStyle.fontSize', config.LANGUAGE), inpFz),
+                createCtrl('sty-mar-g', t('modal.clockStyle.margin', config.LANGUAGE), inpMar),
+                createCtrl('sty-rad-g', t('modal.clockStyle.borderRadius', config.LANGUAGE), inpRad)
             );
-            tabAppearance.appendChild(appearanceGrid);
-            modalContent.append(tabFeatures, tabAppearance);
+            paneApp.append(appGrid);
+            content.append(paneFeat, paneApp);
 
-            const modalFooter = create('div', { className: 'modal-footer' });
-            const reloadNotice = create('p', { id: 'yt-enhancer-reload-note', className: 'reload-note', text: t('modal.reloadNotice', config.LANGUAGE) });
-            reloadNotice.style.display = 'none';
-            const modalActions = create('div', { className: 'modal-actions' });
-            const btnApply = create('button', { id: 'yt-enhancer-apply', className: 'btn btn-primary', text: t('modal.buttons.apply', config.LANGUAGE) });
-            const btnReload = create('button', { id: 'yt-enhancer-reload', className: 'btn btn-primary', text: t('modal.buttons.applyAndReload', config.LANGUAGE) });
+            // Footer
+            const footer = create('div', { className: 'yt-enhancer-footer' });
+            const reloadNot = create('p', { className: 'yt-enhancer-reload-note', text: t('modal.reloadNotice', config.LANGUAGE) });
+            reloadNot.style.display = 'none';
+            const btnApply = create('button', { className: 'yt-enhancer-btn', text: t('modal.buttons.apply', config.LANGUAGE) });
+            const btnReload = create('button', { className: 'yt-enhancer-btn yt-enhancer-btn-action', text: t('modal.buttons.applyAndReload', config.LANGUAGE) });
             btnReload.style.display = 'none';
-            
-            modalActions.append(btnApply, btnReload);
-            modalFooter.append(reloadNotice, modalActions);
-            modal.append(modalHeader, tabsNav, modalContent, modalFooter);
+            footer.append(reloadNot, btnApply, btnReload);
 
-            const mountTarget = document.documentElement || document.body;
-            mountTarget.append(overlay, modal);
+            modal.append(modalHeader, tabsNav, content, footer);
+            document.body.append(overlay, modal);
+            modal.focus(); // Acessibilidade - foco inicial
 
-            const closeModal = () => { modal.remove(); overlay.remove(); this.cleanupFunctions.forEach(fn => fn()); };
+            let isClosed = false;
+            const closeModal = () => { 
+                if(isClosed) return; isClosed = true;
+                modal.remove(); overlay.remove(); 
+                this.cleanupFunctions.forEach(fn => fn());
+                this.cleanupFunctions = [];
+            };
+
             this.cleanupFunctions.push(Utils.safeAddEventListener(overlay, 'click', closeModal));
             this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('yt-enhancer-close'), 'click', closeModal));
+            this.cleanupFunctions.push(Utils.safeAddEventListener(window, 'keydown', (e) => { if (e.key === 'Escape') closeModal(); }));
 
-            [tabFeaturesBtn, tabAppearanceBtn].forEach((btn) => {
+            [tabFeat, tabApp].forEach((btn) => {
                 this.cleanupFunctions.push(Utils.safeAddEventListener(btn, 'click', () => {
-                    [tabFeaturesBtn, tabAppearanceBtn].forEach((b) => b.classList.remove('active'));
-                    [tabFeatures, tabAppearance].forEach((pane) => pane.classList.remove('active'));
+                    [tabFeat, tabApp, paneFeat, paneApp].forEach(el => el.classList.remove('active'));
                     btn.classList.add('active');
-                    (btn.dataset.target === 'tab-features' ? tabFeatures : tabAppearance).classList.add('active');
+                    (btn.dataset.target === 'tab-features' ? paneFeat : paneApp).classList.add('active');
                 }));
             });
 
-            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-layout'), 'change', (e) => {
-                layoutSettings.style.display = e.target.checked ? 'flex' : 'none';
-            }));
-
-            ['style-color', 'style-bg-color'].forEach(id => {
-                this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById(id), 'input', (e) => {
-                    if (e.target.nextElementSibling) e.target.nextElementSibling.textContent = e.target.value;
-                }));
+            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-layout'), 'change', e => { laySet.style.display = e.target.checked ? 'flex' : 'none'; }));
+            ['sty-col', 'sty-bg'].forEach(id => {
+                this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById(id), 'input', e => { e.target.nextElementSibling.textContent = e.target.value; }));
             });
 
-            const getNewConfig = () => Utils.sanitizeConfig({
-                LANGUAGE: document.getElementById('cfg-language').value,
-                VIDEOS_PER_ROW: parseInt(document.getElementById('cfg-videos-row').value, 10) || 5,
-                FEATURES: {
-                    CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
-                    LAYOUT_ENHANCEMENT: document.getElementById('cfg-layout').checked,
-                    SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked,
-                    FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked,
-                    RTX_VISUAL_MODE: document.getElementById('cfg-rtx-visual').checked
-                },
-                CLOCK_STYLE: {
-                    color: document.getElementById('style-color').value,
-                    bgColor: document.getElementById('style-bg-color').value,
-                    bgOpacity: parseFloat(document.getElementById('style-bg-opacity').value),
-                    fontSize: parseInt(document.getElementById('style-font-size').value, 10),
-                    margin: parseInt(document.getElementById('style-margin').value, 10),
-                    borderRadius: parseInt(document.getElementById('style-border-radius').value, 10),
-                    position: 'bottom-right'
-                }
-            }, ConfigManager.defaults);
+            const getCfg = () => ({
+                LANGUAGE: langSel.value, VIDEOS_PER_ROW: parseInt(layInp.value, 10),
+                FEATURES: { CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked, LAYOUT_ENHANCEMENT: document.getElementById('cfg-layout').checked, SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked, FULLSCREEN_CLOCK: document.getElementById('cfg-clock').checked, RTX_VISUAL_MODE: document.getElementById('cfg-rtx').checked },
+                CLOCK_STYLE: { color: inpCol.value, bgColor: inpBg.value, bgOpacity: parseFloat(inpOpa.value), fontSize: parseInt(inpFz.value, 10), margin: parseInt(inpMar.value, 10), borderRadius: parseInt(inpRad.value, 10), position: 'bottom-right' }
+            });
 
-            const updateSaveButtons = () => {
-                const newConfig = getNewConfig();
-                const requiresReload = newConfig.FEATURES.CPU_TAMER !== config.FEATURES.CPU_TAMER || newConfig.LANGUAGE !== config.LANGUAGE;
-                btnApply.style.display = requiresReload ? 'none' : 'block';
-                btnReload.style.display = requiresReload ? 'block' : 'none';
-                reloadNotice.style.display = requiresReload ? 'block' : 'none';
+            const updateUI = () => {
+                const nCfg = getCfg();
+                const reqRel = nCfg.FEATURES.CPU_TAMER !== config.FEATURES.CPU_TAMER || nCfg.LANGUAGE !== config.LANGUAGE;
+                btnApply.style.display = reqRel ? 'none' : 'block';
+                btnReload.style.display = reqRel ? 'block' : 'none';
+                reloadNot.style.display = reqRel ? 'block' : 'none';
             };
 
-            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-cpu-tamer'), 'change', updateSaveButtons));
-            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-language'), 'change', updateSaveButtons));
-            this.cleanupFunctions.push(Utils.safeAddEventListener(btnApply, 'click', () => { onSave(getNewConfig()); closeModal(); }));
-            this.cleanupFunctions.push(Utils.safeAddEventListener(btnReload, 'click', () => { onSave(getNewConfig()); closeModal(); setTimeout(() => window.location.reload(), 100); }));
+            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-cpu-tamer'), 'change', updateUI));
+            this.cleanupFunctions.push(Utils.safeAddEventListener(langSel, 'change', updateUI));
+            this.cleanupFunctions.push(Utils.safeAddEventListener(btnApply, 'click', () => { onSave(getCfg()); closeModal(); }));
+            this.cleanupFunctions.push(Utils.safeAddEventListener(btnReload, 'click', () => { onSave(getCfg()); closeModal(); setTimeout(() => window.location.reload(), 150); }));
 
             return true;
         },
-
         ensureStyles() {
+            // Escopo seguro
             const css = `
-                .yt-enhancer-modal { position: fixed !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) !important; width: min(420px, calc(100vw - 32px)) !important; max-height: 80vh !important; background: #121212 !important; color: #f1f1f1 !important; border: 1px solid #333 !important; border-radius: 12px !important; box-shadow: 0 12px 24px rgba(0,0,0,0.8) !important; font-family: 'Roboto', Arial, sans-serif !important; font-size: 14px !important; display: flex !important; flex-direction: column !important; z-index: 2147483647 !important; isolation: isolate !important; }
-                input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-                input[type=number] { -moz-appearance: textfield; }
-                .modal-header { height: 50px; border-bottom: 1px solid #333; display: flex; align-items: center; justify-content: flex-end; padding: 0 15px; position: relative; }
-                .modal-title { position: absolute; left: 50%; transform: translateX(-50%); margin: 0; font-size: 16px; font-weight: 500; color: #fff; }
-                .close-btn { background: none; border: none; color: #aaa; font-size: 24px; cursor: pointer; padding: 0 5px; }
-                .close-btn:hover { color: #fff; }
-                .tabs-nav { display: flex; background: #1a1a1a; border-bottom: 1px solid #333; }
-                .tab-btn { flex: 1; padding: 12px; background: transparent; border: none; color: #888; cursor: pointer; font-weight: 500; border-bottom: 2px solid transparent; }
-                .tab-btn:hover { color: #ccc; background: #222; }
-                .tab-btn.active { color: #3ea6ff; border-bottom-color: #3ea6ff; background: #1a1a1a; }
-                .modal-content { padding: 20px; overflow-y: auto; flex: 1; }
-                .tab-pane { display: none; }
-                .tab-pane.active { display: block; animation: fadeEffect 0.2s; }
-                @keyframes fadeEffect { from {opacity: 0;} to {opacity: 1;} }
-                .options-list { display: flex; flex-direction: column; gap: 15px; }
-                .feature-toggle { display: flex; justify-content: space-between; align-items: center; padding: 10px; background: #1e1e1e; border-radius: 8px; cursor: pointer; }
-                .feature-toggle:hover { background: #252525; }
-                .feature-card-select, .feature-card-input { gap: 16px; }
-                .feature-card-select .styled-select { max-width: 140px; }
-                .toggle-text strong { display: block; font-size: 14px; margin-bottom: 2px; }
-                .toggle-text span { font-size: 12px; color: #aaa; }
-                .toggle-switch { position: relative; width: 40px; height: 22px; }
-                .toggle-switch input { opacity: 0; width: 0; height: 0; }
-                .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 22px; transition: .3s; }
-                .slider:before { position: absolute; content: ''; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; }
-                input:checked + .slider { background-color: #3ea6ff; }
-                input:checked + .slider:before { transform: translateX(18px); }
-                .appearance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-                .control-group { display: flex; flex-direction: column; gap: 8px; }
-                .styled-input, .styled-select { background: #1a1a1a; border: 1px solid #333; color: white; padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box; }
-                .styled-input-small { width: 60px; padding: 5px; background: #222; border: 1px solid #444; color: white; border-radius: 4px; text-align: center; }
-                .color-input-wrapper { display: flex; align-items: center; gap: 10px; background: #1a1a1a; padding: 5px; border: 1px solid #333; border-radius: 6px; }
-                input[type='color'] { border: none; width: 30px; height: 30px; padding: 0; background: none; cursor: pointer; }
-                .modal-footer { padding: 15px 20px; border-top: 1px solid #333; display: flex; align-items: center; gap: 12px; }
-                .reload-note { margin: 0; color: #f6cf6a; font-size: 12px; flex: 1; min-width: 0; }
-                .modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-left: auto; }
-                .btn { min-width: 156px; padding: 8px 20px; border: none; border-radius: 18px; cursor: pointer; font-weight: 500; display: inline-flex; justify-content: center; }
-                .btn-primary { background: #3ea6ff; color: #000; }
-                .btn-primary:hover { opacity: 0.9; }
+                #yt-enhancer-overlay { position: fixed !important; inset: 0 !important; background: rgba(0,0,0,0.8) !important; z-index: ${CONSTANTS.UI_ZINDEX} !important; }
+                .yt-enhancer-modal { position: fixed !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) !important; width: min(420px, 90vw) !important; max-height: 85vh !important; background: #181818 !important; color: #fff !important; border-radius: 12px !important; display: flex !important; flex-direction: column !important; z-index: ${CONSTANTS.UI_ZINDEX + 1} !important; font-family: Roboto, Arial, sans-serif !important; border: 1px solid #333 !important; }
+                .yt-enhancer-modal * { box-sizing: border-box !important; }
+                .yt-enhancer-modal-header { padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+                .yt-enhancer-modal-header h2 { margin: 0; font-size: 16px; font-weight: 500; }
+                .yt-enhancer-close-btn { background: none; border: none; color: #aaa; font-size: 24px; cursor: pointer; }
+                .yt-enhancer-close-btn:hover { color: #fff; }
+                .yt-enhancer-tabs { display: flex; background: #202020; border-bottom: 1px solid #333; }
+                .yt-enhancer-tab { flex: 1; padding: 12px; border: none; background: transparent; color: #888; cursor: pointer; border-bottom: 2px solid transparent; font-weight: 500; }
+                .yt-enhancer-tab.active { color: #3ea6ff; border-bottom-color: #3ea6ff; background: #181818; }
+                .yt-enhancer-content { flex: 1; overflow-y: auto; padding: 20px; }
+                .yt-enhancer-pane { display: none; flex-direction: column; gap: 15px; }
+                .yt-enhancer-pane.active { display: flex; animation: ytEfFade 0.2s; }
+                @keyframes ytEfFade { from { opacity: 0; } to { opacity: 1; } }
+                .yt-enhancer-toggle { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #222; border-radius: 8px; cursor: pointer; gap: 10px; }
+                .yt-enhancer-toggle-text strong { display: block; font-size: 14px; margin-bottom: 4px; }
+                .yt-enhancer-toggle-text span { font-size: 12px; color: #aaa; }
+                .yt-enhancer-switch { position: relative; width: 36px; height: 20px; }
+                .yt-enhancer-switch input { opacity: 0; width: 0; height: 0; }
+                .yt-enhancer-slider { position: absolute; inset: 0; background-color: #555; border-radius: 20px; transition: .3s; }
+                .yt-enhancer-slider:before { position: absolute; content: ''; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: #fff; border-radius: 50%; transition: .3s; }
+                .yt-enhancer-switch input:checked + .yt-enhancer-slider { background-color: #3ea6ff; }
+                .yt-enhancer-switch input:checked + .yt-enhancer-slider:before { transform: translateX(16px); }
+                .yt-enhancer-input, .yt-enhancer-select, .yt-enhancer-input-small { background: #111; color: #fff; border: 1px solid #444; border-radius: 4px; padding: 8px; outline: none; }
+                .yt-enhancer-input-small { width: 60px; text-align: center; }
+                .yt-enhancer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+                .yt-enhancer-ctrl-group { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+                .yt-enhancer-color-wrap { display: flex; gap: 10px; align-items: center; background: #111; border: 1px solid #444; border-radius: 4px; padding: 5px; }
+                .yt-enhancer-color-wrap input[type=color] { border: none; background: none; width: 24px; height: 24px; padding: 0; cursor: pointer; }
+                .yt-enhancer-footer { display: flex; padding: 15px 20px; border-top: 1px solid #333; gap: 10px; align-items: center; justify-content: flex-end; }
+                .yt-enhancer-reload-note { font-size: 12px; color: #f6cf6a; margin: 0; flex: 1; }
+                .yt-enhancer-btn { padding: 8px 16px; border: none; border-radius: 18px; cursor: pointer; background: #333; color: #fff; font-weight: 500; }
+                .yt-enhancer-btn-action, .yt-enhancer-btn { background: #3ea6ff; color: #000; }
+                .yt-enhancer-btn:hover { opacity: 0.9; }
             `;
-            return Utils.injectCSS(css, this.styleId);
+            Utils.injectCSS(css, this.styleId);
         }
     };
 
@@ -475,11 +465,12 @@
     // 3. STYLE MANAGER
     // =======================================================
     const StyleManager = {
-        styleId: 'yt-enhancer-styles',
+        styleId: 'yt-enhancer-styles', initialized: false,
         init() {
-            EventBus.on('configChanged', (config) => this.apply(config));
-            // Garante que o YT não apague o estilo após a navegação SPA
-            document.addEventListener('yt-navigate-finish', () => this.apply(ConfigManager.load()));
+            if (this.initialized) return;
+            EventBus.on('configChanged', (c) => this.apply(c));
+            Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.apply(ConfigManager.load()));
+            this.initialized = true;
         },
         apply(config) {
             let css = '';
@@ -487,14 +478,15 @@
                 css += `ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${config.VIDEOS_PER_ROW} !important; } @media (max-width: 1200px) { ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${Math.min(config.VIDEOS_PER_ROW, 4)} !important; } }`;
             }
             if (config.FEATURES.SHORTS_REMOVAL) {
-                css += `ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]), ytd-guide-entry-renderer:has(a[href^="/shorts"]), ytd-guide-entry-renderer:has(a[href*="/shorts/"]), ytd-mini-guide-entry-renderer:has(a[href^="/shorts"]), ytd-mini-guide-entry-renderer:has(a[href*="/shorts/"]), ytd-guide-entry-renderer:has(a[title="Shorts"]), ytd-mini-guide-entry-renderer[aria-label="Shorts"] { display: none !important; }`;
+                // Modo puro CSS como Fallback leve (JS incremental cuida do DOM agressivo)
+                css += `ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-guide-entry-renderer:has(a[title="Shorts"]) { display: none !important; }`;
             }
             if (config.FEATURES.RTX_VISUAL_MODE) {
+                // Substituído o '*, :before, :after' por alvos precisos do YT
                 css += `
-                    *, :before, :after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-                    ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-guide-renderer { background: transparent !important; background-color: transparent !important; }
-                    tp-yt-paper-dialog, ytd-multi-page-menu-renderer, tp-yt-iron-dropdown, ytd-popup-container tp-yt-paper-dialog, ytd-account-menu { background: var(--yt-spec-base-background, #0f0f0f) !important; background-color: var(--yt-spec-base-background, #0f0f0f) !important; }
-                    .ytp-settings-menu, .ytp-panel, .ytp-panel-menu, .ytp-popup.ytp-contextmenu { background: rgba(15, 15, 15, 0.95) !important; background-color: rgba(15, 15, 15, 0.95) !important; text-shadow: none !important; }
+                    ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-guide-renderer, tp-yt-app-drawer { background: transparent !important; background-color: transparent !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; filter: blur(0px) !important; }
+                    tp-yt-paper-dialog, ytd-multi-page-menu-renderer, tp-yt-iron-dropdown, ytd-popup-container tp-yt-paper-dialog, ytd-account-menu { background: var(--yt-spec-base-background, #0f0f0f) !important; }
+                    .ytp-settings-menu, .ytp-panel, .ytp-panel-menu, .ytp-popup.ytp-contextmenu { background: rgba(15, 15, 15, 0.95) !important; text-shadow: none !important; backdrop-filter: none !important; filter: blur(0px) !important; }
                 `;
             }
             Utils.injectCSS(css, this.styleId);
@@ -502,12 +494,16 @@
     };
 
     // =======================================================
-    // SHORTS MANAGER
+    // 4. SHORTS MANAGER (Seguro e Incremental)
     // =======================================================
     const ShortsManager = {
-        observer: null, listenersCleanup: [], hiddenElements: new Set(), enabled: false,
-        debouncedPrune: Utils.debounce(function() { if (this.enabled) this.prune(); }, 250),
-        init(config) { this.updateConfig(config); EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig)); },
+        observer: null, listenersCleanup: [], hiddenElements: new WeakSet(), enabled: false,
+        debouncedPrune: Utils.debounce(function(mutations) { if (this.enabled) this.pruneIncremental(mutations); }, 150),
+        
+        init(config) {
+            this.updateConfig(config);
+            EventBus.on('configChanged', (c) => this.updateConfig(c));
+        },
         updateConfig(config) {
             const shouldEnable = Boolean(config?.FEATURES?.SHORTS_REMOVAL);
             if (shouldEnable === this.enabled) return;
@@ -515,68 +511,78 @@
             if (this.enabled) this.start(); else this.stop();
         },
         start() {
-            if (!document.documentElement) return;
-            this.prune();
-            if (!this.observer) {
-                this.observer = new MutationObserver(() => this.debouncedPrune());
-                // Observer focado evita gargalo em rolagem
-                const targetNode = document.querySelector('ytd-app') || document.body;
-                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
+            if (this.observer) return;
+            // Valida node e aplica Observer focado nos nós adicionados
+            const targetNode = document.querySelector('ytd-app') || document.body || document.documentElement;
+            if (targetNode) {
+                this.observer = new MutationObserver((mutations) => this.debouncedPrune(mutations));
                 this.observer.observe(targetNode, { childList: true, subtree: true });
+                // Limpeza Inicial pontual (evita O(N) continuo)
+                this.pruneAll();
             }
             if (this.listenersCleanup.length === 0) {
-                this.listenersCleanup.push(Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()), Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()), Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune()));
+                this.listenersCleanup.push(
+                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.pruneAll()),
+                    Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.pruneAll())
+                );
             }
         },
         stop() {
             if (this.observer) { this.observer.disconnect(); this.observer = null; }
-            this.listenersCleanup.forEach((cleanup) => cleanup()); this.listenersCleanup = [];
-            this.restoreHiddenElements();
+            this.listenersCleanup.forEach(c => c()); this.listenersCleanup = [];
+            // Com WeakSet não re-exibimos, pois os nós são GC'd ou gerados novos pelo SPA.
+            // Para segurança total SPA, rely on relayout.
         },
         markHidden(element) {
-            if (!(element instanceof HTMLElement) || this.hiddenElements.has(element)) return;
+            if (!element || !(element instanceof HTMLElement) || this.hiddenElements.has(element)) return;
             element.dataset.ytEnhancerPrevDisplay = element.style.display || '';
             element.style.setProperty('display', 'none', 'important');
             this.hiddenElements.add(element);
         },
-        restoreHiddenElements() {
-            for (const element of this.hiddenElements) {
-                if (!(element instanceof HTMLElement)) continue;
-                const prev = element.dataset.ytEnhancerPrevDisplay || '';
-                if (prev) element.style.display = prev; else element.style.removeProperty('display');
-                delete element.dataset.ytEnhancerPrevDisplay;
-            }
-            this.hiddenElements.clear();
+        isShort(el) {
+            if (!el || !el.matches) return false;
+            if (el.matches('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]')) return true;
+            if (el.querySelector('ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]')) return true;
+            if (el.querySelector('a[href^="/shorts"], a[href*="/shorts/"], [aria-label="Shorts"]')) return true;
+            return false;
         },
-        prune() {
-            const hide = new Set();
-            document.querySelectorAll('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach(n => { hide.add(n); const s = n.closest('ytd-rich-section-renderer'); if(s) hide.add(s); });
-            document.querySelectorAll('ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach(m => { const c = m.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-item-section-renderer'); if(c) hide.add(c); });
-            document.querySelectorAll('a[href^="/shorts"], a[href*="/shorts/"], a[title="Shorts"], [aria-label="Shorts"]').forEach(l => { const e = l.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item'); if(e) hide.add(e); });
-            document.querySelectorAll('ytd-reel-item-renderer, ytd-rich-item-renderer:has(a[href^="/shorts/"])').forEach(i => hide.add(i));
-            hide.forEach(el => this.markHidden(el));
+        pruneIncremental(mutations) {
+            if (!mutations) return;
+            mutations.forEach(m => {
+                m.addedNodes.forEach(node => {
+                    if (node.nodeType === 1) { // ELEMENT_NODE
+                        if (this.isShort(node)) this.markHidden(node.closest('ytd-rich-section-renderer, ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-guide-entry-renderer') || node);
+                        else {
+                            const sub = node.querySelectorAll('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts], ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"], a[href^="/shorts"]');
+                            sub.forEach(s => this.markHidden(s.closest('ytd-rich-section-renderer, ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-guide-entry-renderer') || s));
+                        }
+                    }
+                });
+            });
+        },
+        pruneAll() {
+            document.querySelectorAll('ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, ytd-rich-item-renderer:has(a[href^="/shorts/"]), ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"])').forEach(el => this.markHidden(el));
         },
         cleanup() { this.stop(); }
     };
 
     // =======================================================
-    // 4. SMART CPU TAMER (Totalmente blindado e livre de Erros Críticos)
+    // 5. SMART CPU TAMER (Focado, Restrito e Seguro)
     // =======================================================
     const SmartCpuTamer = {
         initialized: false,
-        originals: { setInterval: null, setTimeout: null, requestAnimationFrame: null, cancelAnimationFrame: null },
-        state: { hidden: false, playing: false, visibleVideo: false, networkOnline: true, throttlingLevel: 0 },
-        handlers: { visibility: null, play: null, pause: null, ended: null, pagehide: null, pageshow: null, freeze: null, resume: null, online: null, offline: null },
-        mainMediaElement: null, mediaStatePoller: null, rafFallbackTimers: new Map(), rafFallbackId: 0,
-        gracePeriodTimer: null, 
-        GRACE_PERIOD_MS: 30000, 
-
+        originals: { setInterval: null, setTimeout: null, clearInterval: null, clearTimeout: null },
+        state: { hidden: false, playing: false, visibleVideo: false, throttlingLevel: 0 },
+        handlers: { visibility: null, play: null, pause: null, pagehide: null, pageshow: null },
+        mainMediaElement: null, mediaStatePoller: null, gracePeriodTimer: null,
+        
         init() {
             if (this.initialized) return;
+            // Monkey patching contido: apenas timeouts longos. Ignora rAF para evitar quebras JIT.
             this.originals.setInterval = targetWindow.setInterval;
             this.originals.setTimeout = targetWindow.setTimeout;
-            this.originals.requestAnimationFrame = targetWindow.requestAnimationFrame;
-            this.originals.cancelAnimationFrame = targetWindow.cancelAnimationFrame;
+            this.originals.clearInterval = targetWindow.clearInterval;
+            this.originals.clearTimeout = targetWindow.clearTimeout;
             
             this.bindEvents();
             this.overrideTimers();
@@ -587,44 +593,42 @@
         cleanup() {
             if (!this.initialized) return;
             
+            // Restauração precisa garantindo que o YT não bugue
             targetWindow.setInterval = this.originals.setInterval;
             targetWindow.setTimeout = this.originals.setTimeout;
-            targetWindow.requestAnimationFrame = this.originals.requestAnimationFrame;
-            targetWindow.cancelAnimationFrame = this.originals.cancelAnimationFrame;
+            targetWindow.clearInterval = this.originals.clearInterval;
+            targetWindow.clearTimeout = this.originals.clearTimeout;
 
             Object.entries(this.handlers).forEach(([k, h]) => {
                 if (!h) return;
-                const eventName = k === 'visibility' ? 'visibilitychange' : k;
-                if (['visibilitychange', 'play', 'pause', 'ended'].includes(eventName)) {
-                    document.removeEventListener(eventName, h, true);
-                } else {
-                    window.removeEventListener(eventName, h, true);
-                }
+                const ev = k === 'visibility' ? 'visibilitychange' : k;
+                if (['visibilitychange', 'play', 'pause'].includes(ev)) document.removeEventListener(ev, h, true);
+                else window.removeEventListener(ev, h, true);
             });
-            this.handlers = { visibility: null, play: null, pause: null, ended: null, pagehide: null, pageshow: null, freeze: null, resume: null, online: null, offline: null };
+            this.handlers = { visibility: null, play: null, pause: null, pagehide: null, pageshow: null };
             
             if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
-            this.rafFallbackTimers.forEach(id => clearTimeout(id));
-            this.rafFallbackTimers.clear();
             if (this.mediaStatePoller) clearInterval(this.mediaStatePoller);
             
-            this.gracePeriodTimer = null; 
-            this.mediaStatePoller = null; 
-            this.mainMediaElement = null;
+            this.gracePeriodTimer = null; this.mediaStatePoller = null; this.mainMediaElement = null;
             this.initialized = false;
         },
         
-        resolveMainMediaElement(force = false) {
-            // Otimização Sênior: evita QuerySelector se o elemento ainda existe no DOM
-            if (!force && this.mainMediaElement?.isConnected) return this.mainMediaElement;
-            this.mainMediaElement = Utils.DOMCache.get('#movie_player video.html5-main-video', force) || Utils.DOMCache.get('.html5-video-player video.html5-main-video', force) || Utils.DOMCache.get('#movie_player video', force) || null;
+        resolveMedia() {
+            if (this.mainMediaElement?.isConnected) return this.mainMediaElement;
+            this.mainMediaElement = Utils.DOMCache.get('video.html5-main-video') || null;
             return this.mainMediaElement;
         },
         
-        refreshPlaybackState() {
-            const media = this.resolveMainMediaElement(false); // Retira o "true" forçado constante
-            this.state.playing = !!(media && !media.paused && !media.ended && media.readyState > 2);
+        updateState(force = false) {
+            const media = this.resolveMedia();
+            this.state.playing = !!(media && !media.paused && !media.ended);
             this.state.visibleVideo = !!(media && media.isConnected && media.getClientRects().length > 0);
+            
+            const graceActive = this.state.hidden && !force && this.gracePeriodTimer;
+            if (!this.state.hidden || graceActive) this.state.throttlingLevel = 0;
+            else if (this.state.playing) this.state.throttlingLevel = 1;
+            else this.state.throttlingLevel = 2; // Inativo total
         },
         
         bindEvents() {
@@ -632,7 +636,7 @@
                 this.state.hidden = document.visibilityState === 'hidden';
                 if (this.state.hidden) {
                     if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
-                    this.gracePeriodTimer = setTimeout(() => { this.gracePeriodTimer = null; this.updateState(true); }, this.GRACE_PERIOD_MS);
+                    this.gracePeriodTimer = setTimeout(() => { this.gracePeriodTimer = null; this.updateState(true); }, CONSTANTS.GRACE_PERIOD_MS);
                 } else {
                     if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
                     this.gracePeriodTimer = null;
@@ -641,266 +645,168 @@
             };
             this.handlers.play = () => this.updateState();
             this.handlers.pause = () => this.updateState();
-            this.handlers.ended = () => this.updateState();
-            this.handlers.pagehide = () => { this.state.hidden = true; this.updateState(true); };
-            this.handlers.pageshow = () => { this.state.hidden = document.visibilityState === 'hidden'; this.updateState(); };
-            this.handlers.freeze = () => { this.state.hidden = true; this.updateState(true); };
-            this.handlers.resume = () => { this.state.hidden = document.visibilityState === 'hidden'; this.updateState(); };
-            this.handlers.online = () => { this.state.networkOnline = true; this.updateState(); };
-            this.handlers.offline = () => { this.state.networkOnline = false; this.updateState(); };
-
+            
             document.addEventListener('visibilitychange', this.handlers.visibility, true);
             document.addEventListener('play', this.handlers.play, true);
             document.addEventListener('pause', this.handlers.pause, true);
-            document.addEventListener('ended', this.handlers.ended, true);
-            window.addEventListener('pagehide', this.handlers.pagehide, true);
-            window.addEventListener('pageshow', this.handlers.pageshow, true);
-            window.addEventListener('freeze', this.handlers.freeze, true);
-            window.addEventListener('resume', this.handlers.resume, true);
-            window.addEventListener('online', this.handlers.online, true);
-            window.addEventListener('offline', this.handlers.offline, true);
-
+            
             this.mediaStatePoller = this.originals.setInterval.call(targetWindow, () => this.updateState(), 2000);
             this.state.hidden = document.visibilityState === 'hidden';
-            this.state.networkOnline = navigator.onLine !== false;
-            this.refreshPlaybackState();
-        },
-        
-        updateState(forceOptimization = false) {
-            this.refreshPlaybackState();
-            const graceActive = this.state.hidden && !forceOptimization && this.gracePeriodTimer;
-            if (!this.state.hidden || graceActive) this.state.throttlingLevel = 0;
-            else if (this.state.playing && this.state.networkOnline) this.state.throttlingLevel = 1;
-            else this.state.throttlingLevel = 2;
         },
         
         overrideTimers() {
             const self = this;
-            const norm = (d) => Number.isFinite(Number(d)) ? Number(d) : 0;
-            
-            const applyOverride = (name, customFunc) => {
-                try { targetWindow[name] = customFunc; } catch (e) {}
+            const isCritical = (cbStr) => {
+                const str = cbStr.toLowerCase();
+                return str.includes('heartbeat') || str.includes('videostats') || str.includes('metrics');
             };
 
-            applyOverride('setInterval', function(callback, delay, ...args) {
-                let d = norm(delay);
-                // Evitamos limites insanos (como 4000) que crasham a aba (XHR Heartbeat do YT morria)
-                if (self.state.throttlingLevel === 2) d = Math.max(d, 2000);
-                else if (self.state.throttlingLevel === 1) d = Math.max(d, 1000);
-                return self.originals.setInterval.apply(targetWindow, [callback, d, ...args]);
-            });
-
-            applyOverride('setTimeout', function(callback, delay, ...args) {
-                let d = norm(delay);
-                // setTimeout deve ser throttled muito suavemente
-                if (self.state.throttlingLevel === 2) d = Math.max(d, 500);
-                return self.originals.setTimeout.apply(targetWindow, [callback, d, ...args]);
-            });
-
-            // Erro fatal de escopo corrigido: A declaração `requestAnimationFrame` que faltava
-            applyOverride('requestAnimationFrame', function(callback) {
-                if (self.state.throttlingLevel > 0) {
-                    const id = 1000000 + ++self.rafFallbackId;
-                    const d = self.state.throttlingLevel === 1 ? 33 : 250;
-                    
-                    const tid = self.originals.setTimeout.apply(targetWindow, [() => {
-                        self.rafFallbackTimers.delete(id);
-                        callback((targetWindow.performance || performance).now());
-                    }, d]);
-                    
-                    self.rafFallbackTimers.set(id, tid);
-                    return id;
+            targetWindow.setInterval = function(callback, delay, ...args) {
+                let d = Number(delay) || 0;
+                // Whitelist: se for script critico do YT, não afeta
+                if (self.state.throttlingLevel > 0 && typeof callback === 'function' && !isCritical(callback.toString())) {
+                    d = self.state.throttlingLevel === 2 ? Math.max(d, 2000) : Math.max(d, 1000);
                 }
-                return self.originals.requestAnimationFrame.call(targetWindow, callback);
-            });
+                return self.originals.setInterval.call(targetWindow, callback, d, ...args);
+            };
 
-            applyOverride('cancelAnimationFrame', function(id) {
-                if (self.rafFallbackTimers.has(id)) {
-                    clearTimeout(self.rafFallbackTimers.get(id));
-                    self.rafFallbackTimers.delete(id);
-                    return;
+            targetWindow.setTimeout = function(callback, delay, ...args) {
+                let d = Number(delay) || 0;
+                if (self.state.throttlingLevel > 0 && typeof callback === 'function' && d >= 50 && !isCritical(callback.toString())) {
+                    d = self.state.throttlingLevel === 2 ? Math.max(d, 500) : Math.max(d, 100);
                 }
-                if (typeof self.originals.cancelAnimationFrame === 'function') {
-                    return self.originals.cancelAnimationFrame.call(targetWindow, id);
-                }
-                clearTimeout(id);
-            });
+                return self.originals.setTimeout.call(targetWindow, callback, d, ...args);
+            };
         }
     };
 
     // =======================================================
-    // 5. CLOCK MANAGER
+    // 6. CLOCK MANAGER
     // =======================================================
     const ClockManager = {
-        clockElement: null, interval: null, timeInterval: null, config: null, observer: null, playerElement: null, fullscreenHandler: null, navigationHandler: null,
+        clockEl: null, timeInterval: null, config: null, playerEl: null, handlers: {}, initialized: false,
         init(config) {
-            this.config = config; this.resolvePlayerElement(true); this.createClock();
-            EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
-            this.fullscreenHandler = () => this.handleFullscreen();
-            this.navigationHandler = () => { this.resolvePlayerElement(true); this.handleFullscreen(); };
-            document.addEventListener('fullscreenchange', this.fullscreenHandler);
-            document.addEventListener('yt-navigate-finish', this.navigationHandler);
-            this.interval = setInterval(() => this.handleFullscreen(), 2000);
+            this.updateConfig(config);
+            if(this.initialized) return;
+            EventBus.on('configChanged', (c) => this.updateConfig(c));
+            
+            this.handlers.fs = () => this.handleFullscreen();
+            this.handlers.nav = () => { this.resolvePlayer(); this.handleFullscreen(); };
+            
+            document.addEventListener('fullscreenchange', this.handlers.fs);
+            document.addEventListener('yt-navigate-finish', this.handlers.nav);
+            this.initialized = true;
         },
-        resolvePlayerElement(force = false) {
-            const current = this.playerElement;
-            if (!force && current?.isConnected) return current;
-            const player = Utils.DOMCache.get('#movie_player', force) || Utils.DOMCache.get('.html5-video-player', force);
-            if (player !== current) {
-                if (this.observer) { this.observer.disconnect(); this.observer = null; }
-                this.playerElement = player || null;
-                if (this.playerElement) this.setupObserver();
-            } else if (!player) { this.playerElement = null; }
-            return this.playerElement;
+        updateConfig(config) {
+            const enable = Boolean(config?.FEATURES?.FULLSCREEN_CLOCK);
+            this.config = config;
+            if (!enable) this.disable();
+            else this.handleFullscreen();
         },
-        updateConfig(newConfig) { this.config = newConfig; this.updateStyle(); this.adjustPosition(); },
+        resolvePlayer() {
+            if (this.playerEl?.isConnected) return this.playerEl;
+            this.playerEl = document.querySelector('.html5-video-player') || document.querySelector('#movie_player');
+            return this.playerEl;
+        },
         createClock() {
-            if (document.getElementById('yt-enhancer-clock')) return;
-            const clock = document.createElement('div');
-            clock.id = 'yt-enhancer-clock';
-            clock.style.cssText = `position: fixed !important; pointer-events: none !important; z-index: 2147483647 !important; font-family: "Roboto", sans-serif !important; font-weight: 400 !important; padding: 6px 14px !important; text-shadow: 0 1px 3px rgba(0,0,0,0.8) !important; display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.3) !important; transition: bottom 0.3s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s !important;`;
-            document.documentElement.appendChild(clock);
-            this.clockElement = clock;
-            this.updateStyle();
+            if (!this.resolvePlayer()) return;
+            if (this.clockEl) this.clockEl.remove();
+            
+            this.clockEl = document.createElement('div');
+            this.clockEl.className = 'yt-enhancer-fs-clock';
+            // Injetado direto no player para que o Fullscreen nativo não oculte
+            this.playerEl.appendChild(this.clockEl);
+            this.applyStyle();
         },
-        setupObserver() {
-            if (!this.playerElement) return;
-            if (this.observer) this.observer.disconnect();
-            this.observer = new MutationObserver(Utils.debounce(() => this.adjustPosition(), 150));
-            this.observer.observe(this.playerElement, { attributes: true, attributeFilter: ['class'] });
-        },
-        adjustPosition() {
-            if (!this.clockElement) return;
-            if (!this.playerElement?.isConnected) this.resolvePlayerElement(true);
-            if (!this.playerElement) return;
-            try {
-                const fs = document.fullscreenElement != null;
-                const controls = !this.playerElement.classList.contains('ytp-autohide');
-                const margin = this.config.CLOCK_STYLE.margin;
-                this.clockElement.style.bottom = `${(fs && controls) ? margin + 110 : margin}px`;
-            } catch (e) {}
-        },
-        updateStyle() {
-            if (!this.clockElement) return;
+        applyStyle() {
+            if (!this.clockEl) return;
             const s = this.config.CLOCK_STYLE;
-            const hexToRgb = (hex) => { const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex); return r ? `${parseInt(r[1],16)},${parseInt(r[2],16)},${parseInt(r[3],16)}` : '0,0,0'; };
-            this.clockElement.style.backgroundColor = `rgba(${hexToRgb(s.bgColor)}, ${s.bgOpacity})`;
-            this.clockElement.style.color = s.color;
-            this.clockElement.style.fontSize = `${s.fontSize}px`;
-            this.clockElement.style.right = `15px`;
-            this.clockElement.style.borderRadius = `${s.borderRadius}px`;
-            this.adjustPosition();
+            this.clockEl.style.cssText = `position: absolute; pointer-events: none; z-index: 1000; display: none; font-family: Roboto, sans-serif; font-weight: 500; text-shadow: 0 1px 3px rgba(0,0,0,0.8); transition: opacity 0.2s; padding: 6px 14px;`;
+            this.clockEl.style.backgroundColor = `rgba(${Utils.hexToRgb(s.bgColor)}, ${s.bgOpacity})`;
+            this.clockEl.style.color = s.color;
+            this.clockEl.style.fontSize = `${s.fontSize}px`;
+            this.clockEl.style.borderRadius = `${s.borderRadius}px`;
+            this.clockEl.style.right = `${s.margin}px`;
+            this.clockEl.style.top = `${s.margin}px`; // Bottom causava conflitos com UI do Player
         },
         updateTime() {
-            if (this.clockElement) this.clockElement.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            if (this.clockEl) this.clockEl.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         },
         handleFullscreen() {
-            if (!this.config.FEATURES.FULLSCREEN_CLOCK) {
-                if (this.clockElement) this.clockElement.style.display = 'none';
+            if (!this.config?.FEATURES?.FULLSCREEN_CLOCK || !document.fullscreenElement) {
+                if (this.clockEl) this.clockEl.style.display = 'none';
+                if (this.timeInterval) { clearInterval(this.timeInterval); this.timeInterval = null; }
                 return;
             }
-            if (!this.playerElement?.isConnected) this.resolvePlayerElement(true);
-            if (document.fullscreenElement) {
-                if (!this.clockElement) this.createClock();
-                this.clockElement.style.display = 'block';
+            if (!this.clockEl || !this.clockEl.isConnected) this.createClock();
+            if (this.clockEl) {
+                this.clockEl.style.display = 'block';
                 this.updateTime();
-                this.adjustPosition();
                 if (!this.timeInterval) this.timeInterval = setInterval(() => this.updateTime(), 1000);
-            } else {
-                if (this.clockElement) this.clockElement.style.display = 'none';
-                if (this.timeInterval) { clearInterval(this.timeInterval); this.timeInterval = null; }
             }
         },
+        disable() {
+            if (this.clockEl) { this.clockEl.remove(); this.clockEl = null; }
+            if (this.timeInterval) { clearInterval(this.timeInterval); this.timeInterval = null; }
+        },
         cleanup() {
-            if (this.observer) this.observer.disconnect();
-            if (this.interval) clearInterval(this.interval);
-            if (this.timeInterval) clearInterval(this.timeInterval);
-            if (this.fullscreenHandler) document.removeEventListener('fullscreenchange', this.fullscreenHandler);
-            if (this.navigationHandler) document.removeEventListener('yt-navigate-finish', this.navigationHandler);
-            this.observer = null; this.playerElement = null; this.fullscreenHandler = null; this.navigationHandler = null;
+            this.disable();
+            if (this.handlers.fs) document.removeEventListener('fullscreenchange', this.handlers.fs);
+            if (this.handlers.nav) document.removeEventListener('yt-navigate-finish', this.handlers.nav);
+            this.initialized = false;
         }
     };
 
-    
     // =======================================================
-    // INITIALIZATION CORE
+    // BOOTSTRAP / CORE INIT
     // =======================================================
     const EnhancerCore = {
         init() {
             try {
+                // SPA Cleanup handlers
                 Utils.safeAddEventListener(document, 'yt-navigate-start', () => Utils.DOMCache.refresh());
-                Utils.safeAddEventListener(document, 'yt-page-data-updated', () => Utils.DOMCache.refresh());
-
-                const config = ConfigManager.load();
                 
+                // Hotkey Seguro
                 Utils.safeAddEventListener(window, 'keydown', (event) => {
-                    if (event.altKey && event.shiftKey && (event.code === 'KeyS' || event.key?.toLowerCase() === 's')) {
+                    if (event.isTrusted && event.altKey && event.shiftKey && (event.code === 'KeyS' || event.key?.toLowerCase() === 's')) {
                         event.preventDefault();
-                        event.stopPropagation();
-                        event.stopImmediatePropagation();
-                        SettingsLauncher.open('shortcut_alt_shift_s');
+                        SettingsLauncher.open('shortcut');
                     }
                 }, { capture: true });
 
-                SettingsLauncher.registerSafeApi();
-
-                try { if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init(); } catch (e) {}
-                try { StyleManager.init(); StyleManager.apply(config); } catch (e) {}
-                try { ShortsManager.init(config); } catch (e) {}
-                try { ClockManager.init(config); } catch (e) {}
+                const config = ConfigManager.load();
                 
+                // Init Módulos
+                if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init();
+                StyleManager.init(); StyleManager.apply(config);
+                ShortsManager.init(config);
+                ClockManager.init(config);
+                
+                // Listener dinâmico
                 EventBus.on('configChanged', (newConfig) => {
-                    try {
-                        if (newConfig.FEATURES.CPU_TAMER && !SmartCpuTamer.initialized) SmartCpuTamer.init();
-                        else if (!newConfig.FEATURES.CPU_TAMER && SmartCpuTamer.initialized) SmartCpuTamer.cleanup();
-                    } catch(e) {}
+                    if (newConfig.FEATURES.CPU_TAMER && !SmartCpuTamer.initialized) SmartCpuTamer.init();
+                    else if (!newConfig.FEATURES.CPU_TAMER && SmartCpuTamer.initialized) SmartCpuTamer.cleanup();
                 });
                 
+                // Teardown completo antes de reload
                 Utils.safeAddEventListener(window, 'beforeunload', () => {
-                    SmartCpuTamer.cleanup(); ClockManager.cleanup(); ShortsManager.cleanup(); Utils.DOMCache.refresh();
+                    SmartCpuTamer.cleanup(); ClockManager.cleanup(); ShortsManager.cleanup(); EventBus.clear();
                 });
 
-                log(`v${ConfigManager.CONFIG_VERSION} Iniciado com sucesso.`);
-            } catch (error) {}
+                Logger.log(`v${CONSTANTS.SCRIPT_VERSION} Iniciado. Escopo seguro ativado.`);
+            } catch (err) {
+                Logger.error('Falha Crítica na Inicialização:', err);
+            }
         }
     };
 
-    const Diagnostics = {
-        shortcutRegistered: false,
-        registerShortcut() {
-            if (this.shortcutRegistered) return;
-            this.shortcutRegistered = true;
-
-            Utils.safeAddEventListener(window, 'keydown', (event) => {
-                if (event.altKey && event.shiftKey && (event.code === 'KeyD' || event.key?.toLowerCase() === 'd')) {
-                    console.info('[YT Enhancer][diag] Contexto atual:', { href: location.href });
-                }
-            }, { capture: true });
-        }
-    };
-
-    const BootstrapGate = {
-        evaluate() {
-            const hostnameAllowed = location.hostname === 'www.youtube.com';
-            const contextVisible = document.visibilityState !== 'hidden';
-            let isTopFrame = false;
-            try { isTopFrame = window === window.top; } catch (error) {}
-            const shouldInit = isTopFrame || (hostnameAllowed && contextVisible);
-            return { shouldInit };
-        }
-    };
-
-    Diagnostics.registerShortcut();
-
-    if (BootstrapGate.evaluate().shouldInit) {
+    // Apenas instanciar se estiver no contexto top window ou em modo isolado desejado
+    const isTopFrame = window === window.top;
+    if (isTopFrame && location.hostname === 'www.youtube.com') {
         SettingsLauncher.registerMenuCommand();
         if (document.readyState === 'loading') {
-            Utils.safeAddEventListener(document, 'DOMContentLoaded', () => {
-                SettingsLauncher.registerMenuCommand();
-                EnhancerCore.init();
-            });
+            document.addEventListener('DOMContentLoaded', () => EnhancerCore.init());
         } else {
-            SettingsLauncher.registerMenuCommand();
             EnhancerCore.init();
         }
     }
