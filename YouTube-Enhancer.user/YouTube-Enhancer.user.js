@@ -49,7 +49,8 @@
             [...this.events.get(event)].forEach(callback => {
                 try { callback(data); } catch (e) { console.error(`EventBus error [${event}]:`, e); }
             });
-        }
+        },
+        clear() { this.events.clear(); }
     };
 
     // =======================================================
@@ -106,6 +107,9 @@
                 savedConfig.version = '1.0.0';
                 if (!savedConfig.CLOCK_STYLE?.borderRadius) savedConfig.CLOCK_STYLE = { ...savedConfig.CLOCK_STYLE, borderRadius: 12 };
             }
+            if (typeof savedConfig.FEATURES?.CPU_TAMER_AGGRESSIVE !== 'boolean') {
+                savedConfig.FEATURES = { ...(savedConfig.FEATURES || {}), CPU_TAMER_AGGRESSIVE: false };
+            }
             savedConfig.version = currentVersion;
             return savedConfig;
         },
@@ -130,6 +134,7 @@
                 if (!styleEl && id) styleEl = document.getElementById(id);
                 return Boolean(styleEl && styleEl.isConnected);
             } catch (error) {
+                console.error('[YT Enhancer] injectCSS error:', error);
                 return false;
             }
         }
@@ -140,11 +145,11 @@
     // =======================================================
     const I18N = {
         pt: {
-            modal: { title: '⚙️ Configurações', closeTitle: 'Fechar', tabs: { features: '🔧 Funcionalidades', appearance: '🎨 Aparência do relógio' }, features: { cpuTamer: { title: 'Redução Inteligente de CPU', description: 'Otimiza quando oculto (economiza bateria)' }, layout: { title: 'Layout Grid', description: 'Ajusta vídeos por linha' }, videosPerRow: 'Vídeos por linha', videosPerRowHint: 'Define quantos vídeos aparecem', shorts: { title: 'Remover Shorts', description: 'Limpa Shorts da interface' }, clock: { title: 'Relógio Flutuante', description: 'Mostra hora sobre o vídeo' }, rtx: { title: 'Modo RTX (sem blur)', description: 'Fundos translúcidos ficam transparentes' }, language: { title: 'Idioma da Interface', description: 'Troca textos entre PT e EN' } }, clockStyle: { textColor: 'Cor do Texto', backgroundColor: 'Cor do Fundo', backgroundOpacity: 'Opacidade Fundo', fontSize: 'Tamanho Fonte (px)', margin: 'Margem (px)', borderRadius: 'Arredondamento (px)' }, buttons: { apply: 'Aplicar', applyAndReload: 'Aplicar e Recarregar' }, reloadNotice: 'Idioma e CPU exigem recarregar a página.' },
+            modal: { title: '⚙️ Configurações', closeTitle: 'Fechar', tabs: { features: '🔧 Funcionalidades', appearance: '🎨 Aparência do relógio' }, features: { cpuTamer: { title: 'Redução Inteligente de CPU', description: 'Otimiza quando oculto (economiza bateria)' }, cpuTamerAggressive: { title: 'Modo agressivo de CPU', description: 'Pode quebrar recursos do YouTube; use com cautela.' }, layout: { title: 'Layout Grid', description: 'Ajusta vídeos por linha' }, videosPerRow: 'Vídeos por linha', videosPerRowHint: 'Define quantos vídeos aparecem', shorts: { title: 'Remover Shorts', description: 'Limpa Shorts da interface' }, clock: { title: 'Relógio Flutuante', description: 'Mostra hora sobre o vídeo' }, rtx: { title: 'Modo RTX (sem blur)', description: 'Fundos translúcidos ficam transparentes' }, language: { title: 'Idioma da Interface', description: 'Troca textos entre PT e EN' } }, clockStyle: { textColor: 'Cor do Texto', backgroundColor: 'Cor do Fundo', backgroundOpacity: 'Opacidade Fundo', fontSize: 'Tamanho Fonte (px)', margin: 'Margem (px)', borderRadius: 'Arredondamento (px)' }, buttons: { apply: 'Aplicar', applyAndReload: 'Aplicar e Recarregar' }, reloadNotice: 'Idioma e CPU exigem recarregar a página.' },
             menu: { openSettings: '⚙️ Configurações' }
         },
         en: {
-            modal: { title: '⚙️ Settings', closeTitle: 'Close', tabs: { features: '🔧 Features', appearance: '🎨 Clock appearance' }, features: { cpuTamer: { title: 'Smart CPU Reduction', description: 'Optimizes when hidden (saves battery)' }, layout: { title: 'Grid Layout', description: 'Adjusts videos per row' }, videosPerRow: 'Videos per row', videosPerRowHint: 'Defines videos in each row', shorts: { title: 'Remove Shorts', description: 'Cleans Shorts from UI' }, clock: { title: 'Floating Clock', description: 'Shows time over the video' }, rtx: { title: 'RTX Mode (no blur)', description: 'Turns translucent backgrounds transparent' }, language: { title: 'Interface Language', description: 'Switch texts between EN and PT' } }, clockStyle: { textColor: 'Text Color', backgroundColor: 'Background Color', backgroundOpacity: 'Background Opacity', fontSize: 'Font Size (px)', margin: 'Margin (px)', borderRadius: 'Roundness (px)' }, buttons: { apply: 'Apply', applyAndReload: 'Apply and Reload' }, reloadNotice: 'Language and CPU require reloading.' },
+            modal: { title: '⚙️ Settings', closeTitle: 'Close', tabs: { features: '🔧 Features', appearance: '🎨 Clock appearance' }, features: { cpuTamer: { title: 'Smart CPU Reduction', description: 'Optimizes when hidden (saves battery)' }, cpuTamerAggressive: { title: 'Aggressive CPU mode', description: 'May break YouTube features; use with caution.' }, layout: { title: 'Grid Layout', description: 'Adjusts videos per row' }, videosPerRow: 'Videos per row', videosPerRowHint: 'Defines videos in each row', shorts: { title: 'Remove Shorts', description: 'Cleans Shorts from UI' }, clock: { title: 'Floating Clock', description: 'Shows time over the video' }, rtx: { title: 'RTX Mode (no blur)', description: 'Turns translucent backgrounds transparent' }, language: { title: 'Interface Language', description: 'Switch texts between EN and PT' } }, clockStyle: { textColor: 'Text Color', backgroundColor: 'Background Color', backgroundOpacity: 'Background Opacity', fontSize: 'Font Size (px)', margin: 'Margin (px)', borderRadius: 'Roundness (px)' }, buttons: { apply: 'Apply', applyAndReload: 'Apply and Reload' }, reloadNotice: 'Language and CPU require reloading.' },
             menu: { openSettings: '⚙️ Settings' }
         }
     };
@@ -161,7 +166,7 @@
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
             version: '2.3.1', LANGUAGE: 'pt', VIDEOS_PER_ROW: 4,
-            FEATURES: { CPU_TAMER: true, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true, RTX_VISUAL_MODE: true },
+            FEATURES: { CPU_TAMER: true, CPU_TAMER_AGGRESSIVE: false, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true, RTX_VISUAL_MODE: true },
             CLOCK_STYLE: { color: '#ffffff', bgColor: '#191919', bgOpacity: 0.3, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
         load() {
@@ -293,6 +298,7 @@
 
             optionsList.append(
                 createToggle('cfg-cpu-tamer', t('modal.features.cpuTamer.title', config.LANGUAGE), t('modal.features.cpuTamer.description', config.LANGUAGE), config.FEATURES.CPU_TAMER),
+                createToggle('cfg-cpu-tamer-aggressive', t('modal.features.cpuTamerAggressive.title', config.LANGUAGE), t('modal.features.cpuTamerAggressive.description', config.LANGUAGE), config.FEATURES.CPU_TAMER_AGGRESSIVE),
                 createToggle('cfg-layout', t('modal.features.layout.title', config.LANGUAGE), t('modal.features.layout.description', config.LANGUAGE), config.FEATURES.LAYOUT_ENHANCEMENT)
             );
 
@@ -392,6 +398,7 @@
                 VIDEOS_PER_ROW: parseInt(document.getElementById('cfg-videos-row').value, 10) || 5,
                 FEATURES: {
                     CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
+                    CPU_TAMER_AGGRESSIVE: document.getElementById('cfg-cpu-tamer-aggressive').checked,
                     LAYOUT_ENHANCEMENT: document.getElementById('cfg-layout').checked,
                     SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked,
                     FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked,
@@ -427,8 +434,8 @@
         ensureStyles() {
             const css = `
                 .yt-enhancer-modal { position: fixed !important; top: 50% !important; left: 50% !important; transform: translate(-50%, -50%) !important; width: min(420px, calc(100vw - 32px)) !important; max-height: 80vh !important; background: #121212 !important; color: #f1f1f1 !important; border: 1px solid #333 !important; border-radius: 12px !important; box-shadow: 0 12px 24px rgba(0,0,0,0.8) !important; font-family: 'Roboto', Arial, sans-serif !important; font-size: 14px !important; display: flex !important; flex-direction: column !important; z-index: 2147483647 !important; isolation: isolate !important; }
-                input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-                input[type=number] { -moz-appearance: textfield; }
+                .yt-enhancer-modal input::-webkit-outer-spin-button, .yt-enhancer-modal input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+                .yt-enhancer-modal input[type=number] { -moz-appearance: textfield; }
                 .modal-header { height: 50px; border-bottom: 1px solid #333; display: flex; align-items: center; justify-content: flex-end; padding: 0 15px; position: relative; }
                 .modal-title { position: absolute; left: 50%; transform: translateX(-50%); margin: 0; font-size: 16px; font-weight: 500; color: #fff; }
                 .close-btn { background: none; border: none; color: #aaa; font-size: 24px; cursor: pointer; padding: 0 5px; }
@@ -452,14 +459,14 @@
                 .toggle-switch input { opacity: 0; width: 0; height: 0; }
                 .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #555; border-radius: 22px; transition: .3s; }
                 .slider:before { position: absolute; content: ''; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; border-radius: 50%; transition: .3s; }
-                input:checked + .slider { background-color: #3ea6ff; }
-                input:checked + .slider:before { transform: translateX(18px); }
+                .yt-enhancer-modal input:checked + .slider { background-color: #3ea6ff; }
+                .yt-enhancer-modal input:checked + .slider:before { transform: translateX(18px); }
                 .appearance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
                 .control-group { display: flex; flex-direction: column; gap: 8px; }
                 .styled-input, .styled-select { background: #1a1a1a; border: 1px solid #333; color: white; padding: 10px; border-radius: 6px; width: 100%; box-sizing: border-box; }
                 .styled-input-small { width: 60px; padding: 5px; background: #222; border: 1px solid #444; color: white; border-radius: 4px; text-align: center; }
                 .color-input-wrapper { display: flex; align-items: center; gap: 10px; background: #1a1a1a; padding: 5px; border: 1px solid #333; border-radius: 6px; }
-                input[type='color'] { border: none; width: 30px; height: 30px; padding: 0; background: none; cursor: pointer; }
+                .yt-enhancer-modal input[type='color'] { border: none; width: 30px; height: 30px; padding: 0; background: none; cursor: pointer; }
                 .modal-footer { padding: 15px 20px; border-top: 1px solid #333; display: flex; align-items: center; gap: 12px; }
                 .reload-note { margin: 0; color: #f6cf6a; font-size: 12px; flex: 1; min-width: 0; }
                 .modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-left: auto; }
@@ -487,12 +494,11 @@
                 css += `ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${config.VIDEOS_PER_ROW} !important; } @media (max-width: 1200px) { ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${Math.min(config.VIDEOS_PER_ROW, 4)} !important; } }`;
             }
             if (config.FEATURES.SHORTS_REMOVAL) {
-                css += `ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]), ytd-guide-entry-renderer:has(a[href^="/shorts"]), ytd-guide-entry-renderer:has(a[href*="/shorts/"]), ytd-mini-guide-entry-renderer:has(a[href^="/shorts"]), ytd-mini-guide-entry-renderer:has(a[href*="/shorts/"]), ytd-guide-entry-renderer:has(a[title="Shorts"]), ytd-mini-guide-entry-renderer[aria-label="Shorts"] { display: none !important; }`;
+                css += `ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, ytd-guide-entry-renderer[aria-label*="Shorts"], ytd-mini-guide-entry-renderer[aria-label*="Shorts"] { display: none !important; }`;
             }
             if (config.FEATURES.RTX_VISUAL_MODE) {
                 css += `
-                    *, :before, :after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
-                    ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-guide-renderer { background: transparent !important; background-color: transparent !important; }
+                                        ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-guide-renderer { background: transparent !important; background-color: transparent !important; }
                     tp-yt-paper-dialog, ytd-multi-page-menu-renderer, tp-yt-iron-dropdown, ytd-popup-container tp-yt-paper-dialog, ytd-account-menu { background: var(--yt-spec-base-background, #0f0f0f) !important; background-color: var(--yt-spec-base-background, #0f0f0f) !important; }
                     .ytp-settings-menu, .ytp-panel, .ytp-panel-menu, .ytp-popup.ytp-contextmenu { background: rgba(15, 15, 15, 0.95) !important; background-color: rgba(15, 15, 15, 0.95) !important; text-shadow: none !important; }
                 `;
@@ -507,6 +513,15 @@
     const ShortsManager = {
         observer: null, listenersCleanup: [], hiddenElements: new Set(), enabled: false,
         debouncedPrune: Utils.debounce(function() { if (this.enabled) this.prune(); }, 250),
+        processNode(root) {
+            if (!root || !(root instanceof Element)) return;
+            if (root.matches?.('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts], ytd-reel-item-renderer')) this.markHidden(root);
+            root.querySelectorAll?.('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts], ytd-reel-item-renderer').forEach((el) => this.markHidden(el));
+            root.querySelectorAll?.('a[href^="/shorts"], a[href*="/shorts/"], a[title="Shorts"], [aria-label="Shorts"], ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach((el) => {
+                const host = el.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-item-section-renderer, ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item');
+                if (host) this.markHidden(host);
+            });
+        },
         init(config) { this.updateConfig(config); EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig)); },
         updateConfig(config) {
             const shouldEnable = Boolean(config?.FEATURES?.SHORTS_REMOVAL);
@@ -518,10 +533,10 @@
             if (!document.documentElement) return;
             this.prune();
             if (!this.observer) {
-                this.observer = new MutationObserver(() => this.debouncedPrune());
+                this.observer = new MutationObserver((mutations) => { for (const m of mutations) { m.addedNodes.forEach((n)=>this.processNode(n)); } });
                 // Observer focado evita gargalo em rolagem
-                const targetNode = document.querySelector('ytd-app') || document.body;
-                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
+                const targetNode = document.querySelector('ytd-app') || document.body || document.documentElement;
+                if (!targetNode) return;
                 this.observer.observe(targetNode, { childList: true, subtree: true });
             }
             if (this.listenersCleanup.length === 0) {
@@ -564,10 +579,10 @@
     // =======================================================
     const SmartCpuTamer = {
         initialized: false,
-        originals: { setInterval: null, setTimeout: null, requestAnimationFrame: null, cancelAnimationFrame: null },
+        originals: { setInterval: null, setTimeout: null, clearInterval: null, clearTimeout: null, requestAnimationFrame: null, cancelAnimationFrame: null },
         state: { hidden: false, playing: false, visibleVideo: false, networkOnline: true, throttlingLevel: 0 },
         handlers: { visibility: null, play: null, pause: null, ended: null, pagehide: null, pageshow: null, freeze: null, resume: null, online: null, offline: null },
-        mainMediaElement: null, mediaStatePoller: null, rafFallbackTimers: new Map(), rafFallbackId: 0,
+        mainMediaElement: null, mediaStatePoller: null, rafFallbackTimers: new Map(), rafFallbackId: 0, wrappers: { setInterval: null, setTimeout: null, requestAnimationFrame: null, cancelAnimationFrame: null },
         gracePeriodTimer: null, 
         GRACE_PERIOD_MS: 30000, 
 
@@ -575,11 +590,13 @@
             if (this.initialized) return;
             this.originals.setInterval = targetWindow.setInterval;
             this.originals.setTimeout = targetWindow.setTimeout;
+            this.originals.clearInterval = targetWindow.clearInterval;
+            this.originals.clearTimeout = targetWindow.clearTimeout;
             this.originals.requestAnimationFrame = targetWindow.requestAnimationFrame;
             this.originals.cancelAnimationFrame = targetWindow.cancelAnimationFrame;
             
             this.bindEvents();
-            this.overrideTimers();
+            if (ConfigManager.load().FEATURES.CPU_TAMER_AGGRESSIVE) this.overrideTimers();
             this.initialized = true;
             this.updateState();
         },
@@ -587,10 +604,10 @@
         cleanup() {
             if (!this.initialized) return;
             
-            targetWindow.setInterval = this.originals.setInterval;
-            targetWindow.setTimeout = this.originals.setTimeout;
-            targetWindow.requestAnimationFrame = this.originals.requestAnimationFrame;
-            targetWindow.cancelAnimationFrame = this.originals.cancelAnimationFrame;
+            if (targetWindow.setInterval === this.wrappers.setInterval) targetWindow.setInterval = this.originals.setInterval;
+            if (targetWindow.setTimeout === this.wrappers.setTimeout) targetWindow.setTimeout = this.originals.setTimeout;
+            if (targetWindow.requestAnimationFrame === this.wrappers.requestAnimationFrame) targetWindow.requestAnimationFrame = this.originals.requestAnimationFrame;
+            if (targetWindow.cancelAnimationFrame === this.wrappers.cancelAnimationFrame) targetWindow.cancelAnimationFrame = this.originals.cancelAnimationFrame;
 
             Object.entries(this.handlers).forEach(([k, h]) => {
                 if (!h) return;
@@ -603,10 +620,10 @@
             });
             this.handlers = { visibility: null, play: null, pause: null, ended: null, pagehide: null, pageshow: null, freeze: null, resume: null, online: null, offline: null };
             
-            if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
-            this.rafFallbackTimers.forEach(id => clearTimeout(id));
+            if (this.gracePeriodTimer) this.originals.clearTimeout(this.gracePeriodTimer);
+            this.rafFallbackTimers.forEach(id => this.originals.clearTimeout(id));
             this.rafFallbackTimers.clear();
-            if (this.mediaStatePoller) clearInterval(this.mediaStatePoller);
+            if (this.mediaStatePoller) this.originals.clearInterval(this.mediaStatePoller);
             
             this.gracePeriodTimer = null; 
             this.mediaStatePoller = null; 
@@ -679,7 +696,8 @@
             const norm = (d) => Number.isFinite(Number(d)) ? Number(d) : 0;
             
             const applyOverride = (name, customFunc) => {
-                try { targetWindow[name] = customFunc; } catch (e) {}
+                self.wrappers[name] = customFunc;
+                try { targetWindow[name] = customFunc; } catch (e) { console.error('[YT Enhancer] timer override fail:', name, e); }
             };
 
             applyOverride('setInterval', function(callback, delay, ...args) {
@@ -716,14 +734,14 @@
 
             applyOverride('cancelAnimationFrame', function(id) {
                 if (self.rafFallbackTimers.has(id)) {
-                    clearTimeout(self.rafFallbackTimers.get(id));
+                    self.originals.clearTimeout(self.rafFallbackTimers.get(id));
                     self.rafFallbackTimers.delete(id);
                     return;
                 }
                 if (typeof self.originals.cancelAnimationFrame === 'function') {
                     return self.originals.cancelAnimationFrame.call(targetWindow, id);
                 }
-                clearTimeout(id);
+                self.originals.clearTimeout(id);
             });
         }
     };
@@ -740,7 +758,7 @@
             this.navigationHandler = () => { this.resolvePlayerElement(true); this.handleFullscreen(); };
             document.addEventListener('fullscreenchange', this.fullscreenHandler);
             document.addEventListener('yt-navigate-finish', this.navigationHandler);
-            this.interval = setInterval(() => this.handleFullscreen(), 2000);
+
         },
         resolvePlayerElement(force = false) {
             const current = this.playerElement;
@@ -753,7 +771,7 @@
             } else if (!player) { this.playerElement = null; }
             return this.playerElement;
         },
-        updateConfig(newConfig) { this.config = newConfig; this.updateStyle(); this.adjustPosition(); },
+        updateConfig(newConfig) { this.config = newConfig; if (!this.config.FEATURES.FULLSCREEN_CLOCK) { if (this.timeInterval) { clearInterval(this.timeInterval); this.timeInterval = null; } if (this.clockElement) { this.clockElement.remove(); this.clockElement = null; } } this.updateStyle(); this.adjustPosition(); },
         createClock() {
             if (document.getElementById('yt-enhancer-clock')) return;
             const clock = document.createElement('div');
@@ -813,10 +831,11 @@
         },
         cleanup() {
             if (this.observer) this.observer.disconnect();
-            if (this.interval) clearInterval(this.interval);
+
             if (this.timeInterval) clearInterval(this.timeInterval);
             if (this.fullscreenHandler) document.removeEventListener('fullscreenchange', this.fullscreenHandler);
             if (this.navigationHandler) document.removeEventListener('yt-navigate-finish', this.navigationHandler);
+            if (this.clockElement) { this.clockElement.remove(); this.clockElement = null; }
             this.observer = null; this.playerElement = null; this.fullscreenHandler = null; this.navigationHandler = null;
         }
     };
@@ -844,16 +863,16 @@
 
                 SettingsLauncher.registerSafeApi();
 
-                try { if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init(); } catch (e) {}
-                try { StyleManager.init(); StyleManager.apply(config); } catch (e) {}
-                try { ShortsManager.init(config); } catch (e) {}
-                try { ClockManager.init(config); } catch (e) {}
+                try { if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init(); } catch (e) { console.error('[YT Enhancer] CPU Tamer init failed:', e); }
+                try { StyleManager.init(); StyleManager.apply(config); } catch (e) { console.error('[YT Enhancer] StyleManager init failed:', e); }
+                try { ShortsManager.init(config); } catch (e) { console.error('[YT Enhancer] ShortsManager init failed:', e); }
+                try { ClockManager.init(config); } catch (e) { console.error('[YT Enhancer] ClockManager init failed:', e); }
                 
                 EventBus.on('configChanged', (newConfig) => {
                     try {
                         if (newConfig.FEATURES.CPU_TAMER && !SmartCpuTamer.initialized) SmartCpuTamer.init();
                         else if (!newConfig.FEATURES.CPU_TAMER && SmartCpuTamer.initialized) SmartCpuTamer.cleanup();
-                    } catch(e) {}
+                    } catch(e) { console.error('[YT Enhancer] configChanged handler failed:', e); }
                 });
                 
                 Utils.safeAddEventListener(window, 'beforeunload', () => {
@@ -861,7 +880,7 @@
                 });
 
                 log(`v${ConfigManager.CONFIG_VERSION} Iniciado com sucesso.`);
-            } catch (error) {}
+            } catch (error) { console.error('[YT Enhancer] core init failed:', error); }
         }
     };
 
