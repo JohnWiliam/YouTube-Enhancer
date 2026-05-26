@@ -617,7 +617,10 @@
             this.originals.clearTimeout = targetWindow.clearTimeout;
             this.originals.requestAnimationFrame = targetWindow.requestAnimationFrame;
             this.originals.cancelAnimationFrame = targetWindow.cancelAnimationFrame;
-            
+            this.aggressive = ConfigManager.load().FEATURES.CPU_TAMER_AGGRESSIVE;
+            this.configListener = EventBus.on('configChanged', (newConfig) => {
+                this.aggressive = !!newConfig?.FEATURES?.CPU_TAMER_AGGRESSIVE;
+            });
             this.bindEvents();
             this.overrideTimers();
             this.initialized = true;
