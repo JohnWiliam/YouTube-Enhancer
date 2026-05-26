@@ -49,6 +49,10 @@
             [...this.events.get(event)].forEach(callback => {
                 try { callback(data); } catch (e) { console.error(`EventBus error [${event}]:`, e); }
             });
+        },
+        clear(event = null) {
+            if (event) this.events.delete(event);
+            else this.events.clear();
         }
     };
 
@@ -64,6 +68,7 @@
         sanitizeConfig(config, defaults) {
             const safe = { ...defaults, ...(config || {}), FEATURES: { ...defaults.FEATURES, ...(config?.FEATURES || {}) }, CLOCK_STYLE: { ...defaults.CLOCK_STYLE, ...(config?.CLOCK_STYLE || {}) } };
             safe.LANGUAGE = ['pt', 'en'].includes(safe.LANGUAGE) ? safe.LANGUAGE : defaults.LANGUAGE;
+            Object.keys(safe.FEATURES).forEach((k) => { safe.FEATURES[k] = Boolean(safe.FEATURES[k]); });
             safe.VIDEOS_PER_ROW = this.clamp(safe.VIDEOS_PER_ROW, 3, 8, defaults.VIDEOS_PER_ROW);
             safe.CLOCK_STYLE.bgOpacity = this.clamp(safe.CLOCK_STYLE.bgOpacity, 0, 1, defaults.CLOCK_STYLE.bgOpacity);
             safe.CLOCK_STYLE.fontSize = this.clamp(safe.CLOCK_STYLE.fontSize, 12, 48, defaults.CLOCK_STYLE.fontSize);
@@ -103,6 +108,7 @@
         migrateConfig(savedConfig, currentVersion) {
             if (!savedConfig || typeof savedConfig !== 'object') return null;
             if (!savedConfig.version) {
+                if (savedConfig.FEATURES?.CPU_TAMER_AGGRESSIVE === undefined) savedConfig.FEATURES = { ...(savedConfig.FEATURES || {}), CPU_TAMER_AGGRESSIVE: false };
                 savedConfig.version = '1.0.0';
                 if (!savedConfig.CLOCK_STYLE?.borderRadius) savedConfig.CLOCK_STYLE = { ...savedConfig.CLOCK_STYLE, borderRadius: 12 };
             }
@@ -130,6 +136,7 @@
                 if (!styleEl && id) styleEl = document.getElementById(id);
                 return Boolean(styleEl && styleEl.isConnected);
             } catch (error) {
+                console.error('[YT Enhancer] injectCSS error:', error);
                 return false;
             }
         }
@@ -161,7 +168,7 @@
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
             version: '2.3.1', LANGUAGE: 'pt', VIDEOS_PER_ROW: 4,
-            FEATURES: { CPU_TAMER: true, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true, RTX_VISUAL_MODE: true },
+            FEATURES: { CPU_TAMER: false, CPU_TAMER_AGGRESSIVE: false, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true, RTX_VISUAL_MODE: true },
             CLOCK_STYLE: { color: '#ffffff', bgColor: '#191919', bgOpacity: 0.3, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
         load() {
@@ -264,6 +271,9 @@
             overlay.style.cssText = 'position: fixed !important; inset: 0 !important; background: rgba(0,0,0,0.75) !important; z-index: 2147483646 !important; pointer-events: auto !important;';
 
             const modal = create('div', { id: 'yt-enhancer-settings-modal', className: 'yt-enhancer-modal' });
+            modal.setAttribute('role','dialog');
+            modal.setAttribute('aria-modal','true');
+            modal.setAttribute('aria-label', t('modal.title', config.LANGUAGE));
             if (!stylesInjected) this.applyModalInlineFallback(modal);
 
             const modalHeader = create('div', { className: 'modal-header' });
@@ -364,9 +374,10 @@
             const mountTarget = document.documentElement || document.body;
             mountTarget.append(overlay, modal);
 
-            const closeModal = () => { modal.remove(); overlay.remove(); this.cleanupFunctions.forEach(fn => fn()); };
+            const closeModal = () => { modal.remove(); overlay.remove(); this.cleanupFunctions.forEach(fn => fn()); this.cleanupFunctions = []; };
             this.cleanupFunctions.push(Utils.safeAddEventListener(overlay, 'click', closeModal));
             this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('yt-enhancer-close'), 'click', closeModal));
+            this.cleanupFunctions.push(Utils.safeAddEventListener(document, 'keydown', (e) => { if (e.key === 'Escape') closeModal(); }));
 
             [tabFeaturesBtn, tabAppearanceBtn].forEach((btn) => {
                 this.cleanupFunctions.push(Utils.safeAddEventListener(btn, 'click', () => {
@@ -491,7 +502,7 @@
             }
             if (config.FEATURES.RTX_VISUAL_MODE) {
                 css += `
-                    *, :before, :after { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+                    ytd-app *, ytd-watch-flexy *, ytd-browse * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
                     ytd-masthead, #guide, ytd-mini-guide-renderer, ytd-guide-renderer { background: transparent !important; background-color: transparent !important; }
                     tp-yt-paper-dialog, ytd-multi-page-menu-renderer, tp-yt-iron-dropdown, ytd-popup-container tp-yt-paper-dialog, ytd-account-menu { background: var(--yt-spec-base-background, #0f0f0f) !important; background-color: var(--yt-spec-base-background, #0f0f0f) !important; }
                     .ytp-settings-menu, .ytp-panel, .ytp-panel-menu, .ytp-popup.ytp-contextmenu { background: rgba(15, 15, 15, 0.95) !important; background-color: rgba(15, 15, 15, 0.95) !important; text-shadow: none !important; }
@@ -520,8 +531,8 @@
             if (!this.observer) {
                 this.observer = new MutationObserver(() => this.debouncedPrune());
                 // Observer focado evita gargalo em rolagem
-                const targetNode = document.querySelector('ytd-app') || document.body;
-                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
+                const targetNode = document.querySelector('ytd-app') || document.body || document.documentElement;
+                if (!(targetNode instanceof Node)) return;
                 this.observer.observe(targetNode, { childList: true, subtree: true });
             }
             if (this.listenersCleanup.length === 0) {
@@ -553,7 +564,8 @@
             document.querySelectorAll('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach(n => { hide.add(n); const s = n.closest('ytd-rich-section-renderer'); if(s) hide.add(s); });
             document.querySelectorAll('ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach(m => { const c = m.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer, ytd-item-section-renderer'); if(c) hide.add(c); });
             document.querySelectorAll('a[href^="/shorts"], a[href*="/shorts/"], a[title="Shorts"], [aria-label="Shorts"]').forEach(l => { const e = l.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item'); if(e) hide.add(e); });
-            document.querySelectorAll('ytd-reel-item-renderer, ytd-rich-item-renderer:has(a[href^="/shorts/"])').forEach(i => hide.add(i));
+            document.querySelectorAll('ytd-reel-item-renderer').forEach(i => hide.add(i));
+            document.querySelectorAll('a[href^="/shorts/"]').forEach((a) => { const item = a.closest('ytd-rich-item-renderer'); if (item) hide.add(item); });
             hide.forEach(el => this.markHidden(el));
         },
         cleanup() { this.stop(); }
@@ -564,7 +576,7 @@
     // =======================================================
     const SmartCpuTamer = {
         initialized: false,
-        originals: { setInterval: null, setTimeout: null, requestAnimationFrame: null, cancelAnimationFrame: null },
+        originals: { setInterval: null, clearInterval: null, setTimeout: null, clearTimeout: null, requestAnimationFrame: null, cancelAnimationFrame: null },
         state: { hidden: false, playing: false, visibleVideo: false, networkOnline: true, throttlingLevel: 0 },
         handlers: { visibility: null, play: null, pause: null, ended: null, pagehide: null, pageshow: null, freeze: null, resume: null, online: null, offline: null },
         mainMediaElement: null, mediaStatePoller: null, rafFallbackTimers: new Map(), rafFallbackId: 0,
@@ -574,10 +586,13 @@
         init() {
             if (this.initialized) return;
             this.originals.setInterval = targetWindow.setInterval;
+            this.originals.clearInterval = targetWindow.clearInterval;
             this.originals.setTimeout = targetWindow.setTimeout;
+            this.originals.clearTimeout = targetWindow.clearTimeout;
             this.originals.requestAnimationFrame = targetWindow.requestAnimationFrame;
             this.originals.cancelAnimationFrame = targetWindow.cancelAnimationFrame;
             
+            this.config = { aggressive: false };
             this.bindEvents();
             this.overrideTimers();
             this.initialized = true;
@@ -587,10 +602,10 @@
         cleanup() {
             if (!this.initialized) return;
             
-            targetWindow.setInterval = this.originals.setInterval;
-            targetWindow.setTimeout = this.originals.setTimeout;
-            targetWindow.requestAnimationFrame = this.originals.requestAnimationFrame;
-            targetWindow.cancelAnimationFrame = this.originals.cancelAnimationFrame;
+            if (targetWindow.setInterval?.__ytEnhancerWrapped) targetWindow.setInterval = this.originals.setInterval;
+            if (targetWindow.setTimeout?.__ytEnhancerWrapped) targetWindow.setTimeout = this.originals.setTimeout;
+            if (targetWindow.requestAnimationFrame?.__ytEnhancerWrapped) targetWindow.requestAnimationFrame = this.originals.requestAnimationFrame;
+            if (targetWindow.cancelAnimationFrame?.__ytEnhancerWrapped) targetWindow.cancelAnimationFrame = this.originals.cancelAnimationFrame;
 
             Object.entries(this.handlers).forEach(([k, h]) => {
                 if (!h) return;
@@ -679,21 +694,20 @@
             const norm = (d) => Number.isFinite(Number(d)) ? Number(d) : 0;
             
             const applyOverride = (name, customFunc) => {
-                try { targetWindow[name] = customFunc; } catch (e) {}
+                try { customFunc.__ytEnhancerWrapped = true; targetWindow[name] = customFunc; } catch (e) { console.error('[YT Enhancer] override failure', name, e); }
             };
 
             applyOverride('setInterval', function(callback, delay, ...args) {
                 let d = norm(delay);
                 // Evitamos limites insanos (como 4000) que crasham a aba (XHR Heartbeat do YT morria)
-                if (self.state.throttlingLevel === 2) d = Math.max(d, 2000);
-                else if (self.state.throttlingLevel === 1) d = Math.max(d, 1000);
+                if (self.config?.aggressive && self.state.throttlingLevel === 2) d = Math.max(d, 2000);
                 return self.originals.setInterval.apply(targetWindow, [callback, d, ...args]);
             });
 
             applyOverride('setTimeout', function(callback, delay, ...args) {
                 let d = norm(delay);
                 // setTimeout deve ser throttled muito suavemente
-                if (self.state.throttlingLevel === 2) d = Math.max(d, 500);
+                if (self.config?.aggressive && self.state.throttlingLevel === 2) d = Math.max(d, 500);
                 return self.originals.setTimeout.apply(targetWindow, [callback, d, ...args]);
             });
 
@@ -716,14 +730,14 @@
 
             applyOverride('cancelAnimationFrame', function(id) {
                 if (self.rafFallbackTimers.has(id)) {
-                    clearTimeout(self.rafFallbackTimers.get(id));
+                    self.originals.clearTimeout.call(targetWindow, self.rafFallbackTimers.get(id));
                     self.rafFallbackTimers.delete(id);
                     return;
                 }
                 if (typeof self.originals.cancelAnimationFrame === 'function') {
                     return self.originals.cancelAnimationFrame.call(targetWindow, id);
                 }
-                clearTimeout(id);
+                self.originals.clearTimeout.call(targetWindow, id);
             });
         }
     };
@@ -740,7 +754,7 @@
             this.navigationHandler = () => { this.resolvePlayerElement(true); this.handleFullscreen(); };
             document.addEventListener('fullscreenchange', this.fullscreenHandler);
             document.addEventListener('yt-navigate-finish', this.navigationHandler);
-            this.interval = setInterval(() => this.handleFullscreen(), 2000);
+
         },
         resolvePlayerElement(force = false) {
             const current = this.playerElement;
@@ -813,11 +827,11 @@
         },
         cleanup() {
             if (this.observer) this.observer.disconnect();
-            if (this.interval) clearInterval(this.interval);
             if (this.timeInterval) clearInterval(this.timeInterval);
             if (this.fullscreenHandler) document.removeEventListener('fullscreenchange', this.fullscreenHandler);
             if (this.navigationHandler) document.removeEventListener('yt-navigate-finish', this.navigationHandler);
-            this.observer = null; this.playerElement = null; this.fullscreenHandler = null; this.navigationHandler = null;
+            if (this.clockElement) { this.clockElement.remove(); this.clockElement = null; }
+            this.observer = null; this.playerElement = null; this.fullscreenHandler = null; this.navigationHandler = null; this.timeInterval = null;
         }
     };
 
@@ -844,16 +858,16 @@
 
                 SettingsLauncher.registerSafeApi();
 
-                try { if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init(); } catch (e) {}
-                try { StyleManager.init(); StyleManager.apply(config); } catch (e) {}
-                try { ShortsManager.init(config); } catch (e) {}
-                try { ClockManager.init(config); } catch (e) {}
+                try { if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init(); } catch (e) { console.error('[YT Enhancer] CPU tamer init failed', e); }
+                try { StyleManager.init(); StyleManager.apply(config); } catch (e) { console.error('[YT Enhancer] Style init failed', e); }
+                try { ShortsManager.init(config); } catch (e) { console.error('[YT Enhancer] Shorts init failed', e); }
+                try { if (config.FEATURES.FULLSCREEN_CLOCK) ClockManager.init(config); } catch (e) { console.error('[YT Enhancer] Clock init failed', e); }
                 
                 EventBus.on('configChanged', (newConfig) => {
                     try {
                         if (newConfig.FEATURES.CPU_TAMER && !SmartCpuTamer.initialized) SmartCpuTamer.init();
                         else if (!newConfig.FEATURES.CPU_TAMER && SmartCpuTamer.initialized) SmartCpuTamer.cleanup();
-                    } catch(e) {}
+                    } catch(e) { console.error('[YT Enhancer] configChanged failure', e); }
                 });
                 
                 Utils.safeAddEventListener(window, 'beforeunload', () => {
@@ -861,7 +875,7 @@
                 });
 
                 log(`v${ConfigManager.CONFIG_VERSION} Iniciado com sucesso.`);
-            } catch (error) {}
+            } catch (error) { console.error('[YT Enhancer] fatal init error', error); }
         }
     };
 
