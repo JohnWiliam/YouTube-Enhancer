@@ -896,10 +896,10 @@
 
                 SettingsLauncher.registerSafeApi();
 
-                if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init();
-                StyleManager.init(); StyleManager.apply(config);
-                ShortsManager.init(config);
-                ClockManager.init(config);
+                try { if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init(); } catch (e) { console.error('[YT Enhancer] SmartCpuTamer init failed:', e); }
+                try { StyleManager.init(); StyleManager.apply(config); } catch (e) { console.error('[YT Enhancer] StyleManager init failed:', e); }
+                try { ShortsManager.init(config); } catch (e) { console.error('[YT Enhancer] ShortsManager init failed:', e); }
+                try { ClockManager.init(config); } catch (e) { console.error('[YT Enhancer] ClockManager init failed:', e); }
                 
                 EventBus.on('configChanged', (newConfig) => {
                         if (newConfig.FEATURES.CPU_TAMER && !SmartCpuTamer.initialized) SmartCpuTamer.init();
