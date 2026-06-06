@@ -3,7 +3,7 @@
 > **Optimize, customize, and take control of your YouTube experience.**<br>
 > **Otimize, personalize e domine sua experiência no YouTube.**
 
-![Version](https://img.shields.io/badge/Version-2.3.2-blue)
+![Version](https://img.shields.io/badge/Version-2.4.0-blue)
 ![Language](https://img.shields.io/badge/Language-JavaScript-F7DF1E?logo=javascript&logoColor=F7DF1E)
 ![Author](https://img.shields.io/badge/Author-John%20Wiliam%20%26%20IA-orange)
 [![Install](https://img.shields.io/badge/Install-Click_Here-green)](https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js)
@@ -34,11 +34,6 @@ YouTube Enhancer is a userscript for **Violentmonkey** that improves YouTube's l
    - Automatically hides while player settings and context menus are open, so it does not cover quality, speed, or other options.
    - Supports adjustable text color, background color, opacity, size, margin, and border radius.
    - The default background is `#000000` with `0.3` opacity.
-
-5. **🧼 RTX Visual Mode (No Blur/Translucency)**
-   - Removes blur and `backdrop-filter` effects from the YouTube interface.
-   - Replaces translucent backgrounds with transparency.
-   - Keeps timeline hover preview thumbnails, including chapter previews, visible.
 
 ### ⚙️ Settings Panel
 
@@ -92,11 +87,6 @@ O YouTube Enhancer é um userscript para **Violentmonkey** que melhora o layout,
    - Oculta-se automaticamente enquanto menus de configuração ou de contexto do player estão abertos, sem cobrir resolução, velocidade ou outras opções.
    - Permite ajustar cor do texto, cor do fundo, opacidade, tamanho, margem e arredondamento.
    - O fundo padrão é `#000000`, com opacidade `0,3`.
-
-5. **🧼 Modo RTX (Sem Blur/Translucidez)**
-   - Remove efeitos de blur e `backdrop-filter` da interface do YouTube.
-   - Substitui fundos translúcidos por transparência.
-   - Mantém visíveis as miniaturas de prévia da timeline, incluindo prévias de capítulos.
 
 ### ⚙️ Painel de Configurações
 
