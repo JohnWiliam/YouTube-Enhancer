@@ -658,7 +658,7 @@
             }
 
             const selectors = [
-                'ytd-rich-section-renderer.ytd-rich-grid-renderer.style-scope',
+                'ytd-rich-section-renderer:has(ytd-rich-shelf-renderer)',
                 'ytd-rich-shelf-renderer #dismissible.style-scope.ytd-rich-shelf-renderer'
             ];
             document.querySelectorAll(selectors.join(', ')).forEach((element) => {
