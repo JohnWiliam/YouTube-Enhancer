@@ -850,7 +850,7 @@
         },
         ensureClockMount() {
             const fullscreenRoot = document.fullscreenElement;
-            if (fullscreenRoot && this.clockElement?.parentElement !== fullscreenRoot) {
+            if (fullscreenRoot && this.clockElement && this.clockElement.parentElement !== fullscreenRoot) {
                 fullscreenRoot.appendChild(this.clockElement);
             }
         },
