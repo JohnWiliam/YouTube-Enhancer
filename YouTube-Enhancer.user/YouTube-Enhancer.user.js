@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      2.3.1
-// @description  Reduz uso de CPU (Smart Mode), personaliza layout, remove Shorts, elimina blur, adiciona relógio.
+// @version      2.3.2
+// @description  Personaliza o layout, remove elementos indesejados, elimina blur e adiciona relógio em tela cheia.
 // @author       John Wiliam & IA
 // @match        *://*.youtube.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=youtube.com
@@ -13,19 +13,17 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_addStyle
 // @grant        GM_addElement
-// @grant        unsafeWindow
 // @run-at       document-start
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = '2.3.1';
+    const SCRIPT_VERSION = '2.3.2';
     const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
     if (window[FLAG]) return;
     window[FLAG] = true;
 
-    const targetWindow = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
     const log = (msg) => console.log(`[YT Enhancer] ${msg}`);
 
     // =======================================================
@@ -71,7 +69,7 @@
             return fallback;
         },
         sanitizeConfig(config, defaults) {
-            const safe = { ...defaults, ...(config || {}), FEATURES: { ...defaults.FEATURES, ...(config?.FEATURES || {}) }, CLOCK_STYLE: { ...defaults.CLOCK_STYLE, ...(config?.CLOCK_STYLE || {}) } };
+            const safe = { ...defaults, ...(config || {}), FEATURES: { ...defaults.FEATURES }, CLOCK_STYLE: { ...defaults.CLOCK_STYLE, ...(config?.CLOCK_STYLE || {}) } };
             safe.LANGUAGE = ['pt', 'en'].includes(safe.LANGUAGE) ? safe.LANGUAGE : defaults.LANGUAGE;
             safe.VIDEOS_PER_ROW = this.clamp(safe.VIDEOS_PER_ROW, 3, 8, defaults.VIDEOS_PER_ROW);
             safe.CLOCK_STYLE.bgOpacity = this.clamp(safe.CLOCK_STYLE.bgOpacity, 0, 1, defaults.CLOCK_STYLE.bgOpacity);
@@ -80,12 +78,11 @@
             safe.CLOCK_STYLE.borderRadius = this.clamp(safe.CLOCK_STYLE.borderRadius, 0, 50, defaults.CLOCK_STYLE.borderRadius);
             safe.CLOCK_STYLE.color = this.isHexColor(safe.CLOCK_STYLE.color) ? safe.CLOCK_STYLE.color : defaults.CLOCK_STYLE.color;
             safe.CLOCK_STYLE.bgColor = this.isHexColor(safe.CLOCK_STYLE.bgColor) ? safe.CLOCK_STYLE.bgColor : defaults.CLOCK_STYLE.bgColor;
-            safe.FEATURES.CPU_TAMER = this.toBoolean(safe.FEATURES.CPU_TAMER, defaults.FEATURES.CPU_TAMER);
-            safe.FEATURES.CPU_TAMER_AGGRESSIVE = this.toBoolean(safe.FEATURES.CPU_TAMER_AGGRESSIVE, defaults.FEATURES.CPU_TAMER_AGGRESSIVE);
-            safe.FEATURES.LAYOUT_ENHANCEMENT = this.toBoolean(safe.FEATURES.LAYOUT_ENHANCEMENT, defaults.FEATURES.LAYOUT_ENHANCEMENT);
-            safe.FEATURES.SHORTS_REMOVAL = this.toBoolean(safe.FEATURES.SHORTS_REMOVAL, defaults.FEATURES.SHORTS_REMOVAL);
-            safe.FEATURES.FULLSCREEN_CLOCK = this.toBoolean(safe.FEATURES.FULLSCREEN_CLOCK, defaults.FEATURES.FULLSCREEN_CLOCK);
-            safe.FEATURES.RTX_VISUAL_MODE = this.toBoolean(safe.FEATURES.RTX_VISUAL_MODE, defaults.FEATURES.RTX_VISUAL_MODE);
+            safe.FEATURES.LAYOUT_ENHANCEMENT = this.toBoolean(config?.FEATURES?.LAYOUT_ENHANCEMENT, defaults.FEATURES.LAYOUT_ENHANCEMENT);
+            safe.FEATURES.SHORTS_REMOVAL = this.toBoolean(config?.FEATURES?.SHORTS_REMOVAL, defaults.FEATURES.SHORTS_REMOVAL);
+            safe.FEATURES.RELEVANT_SHELF_REMOVAL = this.toBoolean(config?.FEATURES?.RELEVANT_SHELF_REMOVAL, defaults.FEATURES.RELEVANT_SHELF_REMOVAL);
+            safe.FEATURES.FULLSCREEN_CLOCK = this.toBoolean(config?.FEATURES?.FULLSCREEN_CLOCK, defaults.FEATURES.FULLSCREEN_CLOCK);
+            safe.FEATURES.RTX_VISUAL_MODE = this.toBoolean(config?.FEATURES?.RTX_VISUAL_MODE, defaults.FEATURES.RTX_VISUAL_MODE);
             return safe;
         },
         debounce(func, wait) {
@@ -123,7 +120,6 @@
                 savedConfig.version = '1.0.0';
                 if (!savedConfig.CLOCK_STYLE?.borderRadius) savedConfig.CLOCK_STYLE = { ...savedConfig.CLOCK_STYLE, borderRadius: 12 };
             }
-            if (!Object.prototype.hasOwnProperty.call(savedConfig.FEATURES, 'CPU_TAMER_AGGRESSIVE')) savedConfig.FEATURES.CPU_TAMER_AGGRESSIVE = false;
             savedConfig.version = currentVersion;
             return savedConfig;
         },
@@ -159,11 +155,41 @@
     // =======================================================
     const I18N = {
         pt: {
-            modal: { title: '⚙️ Configurações', closeTitle: 'Fechar', tabs: { features: '🔧 Funcionalidades', appearance: '🎨 Aparência do relógio' }, features: { cpuTamer: { title: 'Redução Inteligente de CPU', description: 'Otimiza quando oculto (economiza bateria)' }, layout: { title: 'Layout Grid', description: 'Ajusta vídeos por linha' }, videosPerRow: 'Vídeos por linha', videosPerRowHint: 'Define quantos vídeos aparecem', shorts: { title: 'Remover Shorts', description: 'Limpa Shorts da interface' }, clock: { title: 'Relógio Flutuante', description: 'Mostra hora sobre o vídeo' }, rtx: { title: 'Modo RTX (sem blur)', description: 'Fundos translúcidos ficam transparentes' }, language: { title: 'Idioma da Interface', description: 'Troca textos entre PT e EN' } }, clockStyle: { textColor: 'Cor do Texto', backgroundColor: 'Cor do Fundo', backgroundOpacity: 'Opacidade Fundo', fontSize: 'Tamanho Fonte (px)', margin: 'Margem (px)', borderRadius: 'Arredondamento (px)' }, buttons: { apply: 'Aplicar', applyAndReload: 'Aplicar e Recarregar' }, reloadNotice: 'Idioma e CPU exigem recarregar a página.' },
+            modal: {
+                title: '⚙️ Configurações', closeTitle: 'Fechar',
+                tabs: { features: '🔧 Funcionalidades', appearance: '🎨 Aparência do relógio' },
+                features: {
+                    layout: { title: 'Layout Grid', description: 'Ajusta vídeos por linha' },
+                    videosPerRow: 'Vídeos por linha', videosPerRowHint: 'Define quantos vídeos aparecem',
+                    shorts: { title: 'Remover Shorts', description: 'Limpa Shorts da interface' },
+                    relevantShelf: { title: 'Remover (Mais Relevantes)', description: "Remove o elemento 'Mais relevantes' da página de inscrições." },
+                    clock: { title: 'Relógio Flutuante', description: 'Mostra a hora sobre o vídeo' },
+                    rtx: { title: 'Modo RTX (sem blur)', description: 'Fundos translúcidos ficam transparentes' },
+                    language: { title: 'Idioma da Interface', description: 'Alterna os textos entre PT e EN' }
+                },
+                clockStyle: { textColor: 'Cor do Texto', backgroundColor: 'Cor do Fundo', backgroundOpacity: 'Opacidade Fundo', fontSize: 'Tamanho da Fonte (px)', margin: 'Margem (px)', borderRadius: 'Arredondamento (px)' },
+                buttons: { apply: 'Aplicar', applyAndReload: 'Aplicar e Recarregar' },
+                reloadNotice: 'A alteração de idioma exige recarregar a página.'
+            },
             menu: { openSettings: '⚙️ Configurações' }
         },
         en: {
-            modal: { title: '⚙️ Settings', closeTitle: 'Close', tabs: { features: '🔧 Features', appearance: '🎨 Clock appearance' }, features: { cpuTamer: { title: 'Smart CPU Reduction', description: 'Optimizes when hidden (saves battery)' }, layout: { title: 'Grid Layout', description: 'Adjusts videos per row' }, videosPerRow: 'Videos per row', videosPerRowHint: 'Defines videos in each row', shorts: { title: 'Remove Shorts', description: 'Cleans Shorts from UI' }, clock: { title: 'Floating Clock', description: 'Shows time over the video' }, rtx: { title: 'RTX Mode (no blur)', description: 'Turns translucent backgrounds transparent' }, language: { title: 'Interface Language', description: 'Switch texts between EN and PT' } }, clockStyle: { textColor: 'Text Color', backgroundColor: 'Background Color', backgroundOpacity: 'Background Opacity', fontSize: 'Font Size (px)', margin: 'Margin (px)', borderRadius: 'Roundness (px)' }, buttons: { apply: 'Apply', applyAndReload: 'Apply and Reload' }, reloadNotice: 'Language and CPU require reloading.' },
+            modal: {
+                title: '⚙️ Settings', closeTitle: 'Close',
+                tabs: { features: '🔧 Features', appearance: '🎨 Clock appearance' },
+                features: {
+                    layout: { title: 'Grid Layout', description: 'Adjusts videos per row' },
+                    videosPerRow: 'Videos per row', videosPerRowHint: 'Defines how many videos appear in each row',
+                    shorts: { title: 'Remove Shorts', description: 'Removes Shorts from the interface' },
+                    relevantShelf: { title: 'Remove (Most Relevant)', description: "Removes the 'Most relevant' element from the Subscriptions page." },
+                    clock: { title: 'Floating Clock', description: 'Shows the time over the video' },
+                    rtx: { title: 'RTX Mode (no blur)', description: 'Makes translucent backgrounds transparent' },
+                    language: { title: 'Interface Language', description: 'Switches interface text between EN and PT' }
+                },
+                clockStyle: { textColor: 'Text Color', backgroundColor: 'Background Color', backgroundOpacity: 'Background Opacity', fontSize: 'Font Size (px)', margin: 'Margin (px)', borderRadius: 'Roundness (px)' },
+                buttons: { apply: 'Apply', applyAndReload: 'Apply and Reload' },
+                reloadNotice: 'Changing the language requires reloading the page.'
+            },
             menu: { openSettings: '⚙️ Settings' }
         }
     };
@@ -176,12 +202,12 @@
     };
 
     const ConfigManager = {
-        CONFIG_VERSION: '2.3.1',
+        CONFIG_VERSION: '2.3.2',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
-            version: '2.3.1', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
-            FEATURES: { CPU_TAMER: true, CPU_TAMER_AGGRESSIVE: false, LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, FULLSCREEN_CLOCK: true, RTX_VISUAL_MODE: true },
-            CLOCK_STYLE: { color: '#ffffff', bgColor: '#191919', bgOpacity: 0.3, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
+            version: '2.3.2', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
+            FEATURES: { LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, RELEVANT_SHELF_REMOVAL: true, FULLSCREEN_CLOCK: true, RTX_VISUAL_MODE: true },
+            CLOCK_STYLE: { color: '#ffffff', bgColor: '#000000', bgOpacity: 0.3, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
         load() {
             try {
@@ -311,7 +337,6 @@
             };
 
             optionsList.append(
-                createToggle('cfg-cpu-tamer', t('modal.features.cpuTamer.title', config.LANGUAGE), t('modal.features.cpuTamer.description', config.LANGUAGE), config.FEATURES.CPU_TAMER),
                 createToggle('cfg-layout', t('modal.features.layout.title', config.LANGUAGE), t('modal.features.layout.description', config.LANGUAGE), config.FEATURES.LAYOUT_ENHANCEMENT)
             );
 
@@ -324,6 +349,7 @@
 
             optionsList.append(
                 createToggle('cfg-shorts', t('modal.features.shorts.title', config.LANGUAGE), t('modal.features.shorts.description', config.LANGUAGE), config.FEATURES.SHORTS_REMOVAL),
+                createToggle('cfg-relevant-shelf', t('modal.features.relevantShelf.title', config.LANGUAGE), t('modal.features.relevantShelf.description', config.LANGUAGE), config.FEATURES.RELEVANT_SHELF_REMOVAL),
                 createToggle('cfg-clock-enable', t('modal.features.clock.title', config.LANGUAGE), t('modal.features.clock.description', config.LANGUAGE), config.FEATURES.FULLSCREEN_CLOCK),
                 createToggle('cfg-rtx-visual', t('modal.features.rtx.title', config.LANGUAGE), t('modal.features.rtx.description', config.LANGUAGE), config.FEATURES.RTX_VISUAL_MODE)
             );
@@ -427,9 +453,9 @@
                 LANGUAGE: document.getElementById('cfg-language').value,
                 VIDEOS_PER_ROW: parseInt(document.getElementById('cfg-videos-row').value, 10) || 5,
                 FEATURES: {
-                    CPU_TAMER: document.getElementById('cfg-cpu-tamer').checked,
                     LAYOUT_ENHANCEMENT: document.getElementById('cfg-layout').checked,
                     SHORTS_REMOVAL: document.getElementById('cfg-shorts').checked,
+                    RELEVANT_SHELF_REMOVAL: document.getElementById('cfg-relevant-shelf').checked,
                     FULLSCREEN_CLOCK: document.getElementById('cfg-clock-enable').checked,
                     RTX_VISUAL_MODE: document.getElementById('cfg-rtx-visual').checked
                 },
@@ -446,17 +472,16 @@
 
             const updateSaveButtons = () => {
                 const newConfig = getNewConfig();
-                const requiresReload = newConfig.FEATURES.CPU_TAMER !== config.FEATURES.CPU_TAMER || newConfig.LANGUAGE !== config.LANGUAGE;
+                const requiresReload = newConfig.LANGUAGE !== config.LANGUAGE;
                 btnApply.style.display = requiresReload ? 'none' : 'block';
                 btnReload.style.display = requiresReload ? 'block' : 'none';
                 reloadNotice.style.display = requiresReload ? 'block' : 'none';
             };
 
-            this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-cpu-tamer'), 'change', updateSaveButtons));
             this.cleanupFunctions.push(Utils.safeAddEventListener(document.getElementById('cfg-language'), 'change', updateSaveButtons));
             this.cleanupFunctions.push(Utils.safeAddEventListener(btnApply, 'click', () => { onSave(getNewConfig()); closeModal(); }));
             this.cleanupFunctions.push(Utils.safeAddEventListener(btnReload, 'click', () => { onSave(getNewConfig()); closeModal(); setTimeout(() => window.location.reload(), 100); }));
-            setTimeout(() => document.getElementById('cfg-cpu-tamer')?.focus(), 0);
+            setTimeout(() => document.getElementById('cfg-layout')?.focus(), 0);
 
             return true;
         },
@@ -598,187 +623,76 @@
     };
 
     // =======================================================
-    // 4. SMART CPU TAMER (Totalmente blindado e livre de Erros Críticos)
+    // RELEVANT SHELF MANAGER
     // =======================================================
-    const SmartCpuTamer = {
-        initialized: false,
-        originals: { setInterval: null, clearInterval: null, setTimeout: null, clearTimeout: null, requestAnimationFrame: null, cancelAnimationFrame: null },
-        state: { hidden: false, playing: false, visibleVideo: false, networkOnline: true, throttlingLevel: 0 },
-        handlers: { visibility: null, play: null, pause: null, ended: null, pagehide: null, pageshow: null, freeze: null, resume: null, online: null, offline: null },
-        mainMediaElement: null, mediaStatePoller: null, rafFallbackTimers: new Map(), rafFallbackId: 0,
-        gracePeriodTimer: null, 
-        GRACE_PERIOD_MS: 30000, 
+    const RelevantShelfManager = {
+        observer: null, listenersCleanup: [], hiddenElements: new Set(), enabled: false,
+        debouncedPrune: Utils.debounce(function() { if (this.enabled) this.prune(); }, 250),
+        init(config) { this.updateConfig(config); EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig)); },
+        updateConfig(config) {
+            const shouldEnable = Boolean(config?.FEATURES?.RELEVANT_SHELF_REMOVAL);
+            if (shouldEnable === this.enabled) return;
+            this.enabled = shouldEnable;
+            if (this.enabled) this.start(); else this.stop();
+        },
+        start() {
+            if (!document.documentElement) return;
+            this.prune();
+            if (!this.observer) {
+                this.observer = new MutationObserver(() => this.debouncedPrune());
+                const targetNode = document.querySelector('ytd-app') || document.body;
+                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
+            }
+            if (this.listenersCleanup.length === 0) {
+                this.listenersCleanup.push(
+                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()),
+                    Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()),
+                    Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune())
+                );
+            }
+        },
+        stop() {
+            if (this.observer) { this.observer.disconnect(); this.observer = null; }
+            this.listenersCleanup.forEach((cleanup) => cleanup());
+            this.listenersCleanup = [];
+            this.restoreHiddenElements();
+        },
+        markHidden(element) {
+            if (!(element instanceof HTMLElement) || this.hiddenElements.has(element)) return;
+            element.dataset.ytEnhancerPrevDisplay = element.style.display || '';
+            element.style.setProperty('display', 'none', 'important');
+            this.hiddenElements.add(element);
+        },
+        restoreHiddenElements() {
+            for (const element of this.hiddenElements) {
+                if (!(element instanceof HTMLElement)) continue;
+                const previousDisplay = element.dataset.ytEnhancerPrevDisplay || '';
+                if (previousDisplay) element.style.display = previousDisplay;
+                else element.style.removeProperty('display');
+                delete element.dataset.ytEnhancerPrevDisplay;
+            }
+            this.hiddenElements.clear();
+        },
+        prune() {
+            for (const element of [...this.hiddenElements]) {
+                if (!element.isConnected) this.hiddenElements.delete(element);
+            }
+            if (location.pathname !== '/feed/subscriptions') {
+                this.restoreHiddenElements();
+                return;
+            }
 
-        init() {
-            if (this.initialized) return;
-            this.originals.setInterval = targetWindow.setInterval;
-            this.originals.clearInterval = targetWindow.clearInterval;
-            this.originals.setTimeout = targetWindow.setTimeout;
-            this.originals.clearTimeout = targetWindow.clearTimeout;
-            this.originals.requestAnimationFrame = targetWindow.requestAnimationFrame;
-            this.originals.cancelAnimationFrame = targetWindow.cancelAnimationFrame;
-            this.aggressive = ConfigManager.load().FEATURES.CPU_TAMER_AGGRESSIVE;
-            this.configListener = EventBus.on('configChanged', (newConfig) => {
-                this.aggressive = !!newConfig?.FEATURES?.CPU_TAMER_AGGRESSIVE;
+            const candidates = new Set(document.querySelectorAll('ytd-rich-section-renderer.ytd-rich-grid-renderer.style-scope'));
+            document.querySelectorAll('ytd-rich-shelf-renderer > #dismissible.style-scope.ytd-rich-shelf-renderer').forEach((dismissible) => {
+                candidates.add(dismissible.closest('ytd-rich-section-renderer') || dismissible);
             });
-            this.bindEvents();
-            this.overrideTimers();
-            this.initialized = true;
-            this.updateState();
+            candidates.forEach((element) => this.markHidden(element));
         },
-        
-        cleanup() {
-            if (!this.initialized) return;
-            
-            if (targetWindow.setInterval === this.wrappedSetInterval) targetWindow.setInterval = this.originals.setInterval;
-            if (targetWindow.setTimeout === this.wrappedSetTimeout) targetWindow.setTimeout = this.originals.setTimeout;
-            if (targetWindow.requestAnimationFrame === this.wrappedRequestAnimationFrame) targetWindow.requestAnimationFrame = this.originals.requestAnimationFrame;
-            if (targetWindow.cancelAnimationFrame === this.wrappedCancelAnimationFrame) targetWindow.cancelAnimationFrame = this.originals.cancelAnimationFrame;
-
-            Object.entries(this.handlers).forEach(([k, h]) => {
-                if (!h) return;
-                const eventName = k === 'visibility' ? 'visibilitychange' : k;
-                if (['visibilitychange', 'play', 'pause', 'ended'].includes(eventName)) {
-                    document.removeEventListener(eventName, h, true);
-                } else {
-                    window.removeEventListener(eventName, h, true);
-                }
-            });
-            this.handlers = { visibility: null, play: null, pause: null, ended: null, pagehide: null, pageshow: null, freeze: null, resume: null, online: null, offline: null };
-            
-            if (this.gracePeriodTimer) this.originals.clearTimeout.call(targetWindow, this.gracePeriodTimer);
-            this.rafFallbackTimers.forEach(id => this.originals.clearTimeout.call(targetWindow, id));
-            this.rafFallbackTimers.clear();
-            if (this.mediaStatePoller) this.originals.clearInterval.call(targetWindow, this.mediaStatePoller);
-            
-            this.gracePeriodTimer = null; 
-            this.mediaStatePoller = null; 
-            this.mainMediaElement = null;
-            this.initialized = false;
-        },
-        
-        resolveMainMediaElement(force = false) {
-            // Otimização Sênior: evita QuerySelector se o elemento ainda existe no DOM
-            if (!force && this.mainMediaElement?.isConnected) return this.mainMediaElement;
-            this.mainMediaElement = Utils.DOMCache.get('#movie_player video.html5-main-video', force) || Utils.DOMCache.get('.html5-video-player video.html5-main-video', force) || Utils.DOMCache.get('#movie_player video', force) || null;
-            return this.mainMediaElement;
-        },
-        
-        refreshPlaybackState() {
-            const media = this.resolveMainMediaElement(false); // Retira o "true" forçado constante
-            this.state.playing = !!(media && !media.paused && !media.ended && media.readyState > 2);
-            this.state.visibleVideo = !!(media && media.isConnected && media.getClientRects().length > 0);
-        },
-        
-        bindEvents() {
-            this.handlers.visibility = () => {
-                this.state.hidden = document.visibilityState === 'hidden';
-                if (this.state.hidden) {
-                    if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
-                    this.gracePeriodTimer = setTimeout(() => { this.gracePeriodTimer = null; this.updateState(true); }, this.GRACE_PERIOD_MS);
-                } else {
-                    if (this.gracePeriodTimer) clearTimeout(this.gracePeriodTimer);
-                    this.gracePeriodTimer = null;
-                }
-                this.updateState();
-            };
-            this.handlers.play = () => this.updateState();
-            this.handlers.pause = () => this.updateState();
-            this.handlers.ended = () => this.updateState();
-            this.handlers.pagehide = () => { this.state.hidden = true; this.updateState(true); };
-            this.handlers.pageshow = () => { this.state.hidden = document.visibilityState === 'hidden'; this.updateState(); };
-            this.handlers.freeze = () => { this.state.hidden = true; this.updateState(true); };
-            this.handlers.resume = () => { this.state.hidden = document.visibilityState === 'hidden'; this.updateState(); };
-            this.handlers.online = () => { this.state.networkOnline = true; this.updateState(); };
-            this.handlers.offline = () => { this.state.networkOnline = false; this.updateState(); };
-
-            document.addEventListener('visibilitychange', this.handlers.visibility, true);
-            document.addEventListener('play', this.handlers.play, true);
-            document.addEventListener('pause', this.handlers.pause, true);
-            document.addEventListener('ended', this.handlers.ended, true);
-            window.addEventListener('pagehide', this.handlers.pagehide, true);
-            window.addEventListener('pageshow', this.handlers.pageshow, true);
-            window.addEventListener('freeze', this.handlers.freeze, true);
-            window.addEventListener('resume', this.handlers.resume, true);
-            window.addEventListener('online', this.handlers.online, true);
-            window.addEventListener('offline', this.handlers.offline, true);
-
-            this.mediaStatePoller = this.originals.setInterval.call(targetWindow, () => this.updateState(), 2000);
-            this.state.hidden = document.visibilityState === 'hidden';
-            this.state.networkOnline = navigator.onLine !== false;
-            this.refreshPlaybackState();
-        },
-        
-        updateState(forceOptimization = false) {
-            this.refreshPlaybackState();
-            const graceActive = this.state.hidden && !forceOptimization && this.gracePeriodTimer;
-            if (!this.state.hidden || graceActive) this.state.throttlingLevel = 0;
-            else if (this.state.playing && this.state.networkOnline) this.state.throttlingLevel = 1;
-            else this.state.throttlingLevel = 2;
-        },
-        
-        overrideTimers() {
-            const self = this;
-            const norm = (d) => Number.isFinite(Number(d)) ? Number(d) : 0;
-            
-            const applyOverride = (name, customFunc) => {
-                try { targetWindow[name] = customFunc; } catch (e) {}
-            };
-
-            this.wrappedSetInterval = function(callback, delay, ...args) {
-                let d = norm(delay);
-                const aggressive = ConfigManager.load().FEATURES.CPU_TAMER_AGGRESSIVE;
-                if (aggressive && self.state.throttlingLevel === 2) d = Math.max(d, 2000);
-                else if (aggressive && self.state.throttlingLevel === 1) d = Math.max(d, 1000);
-                return self.originals.setInterval.apply(targetWindow, [callback, d, ...args]);
-            };
-            applyOverride('setInterval', this.wrappedSetInterval);
-
-            this.wrappedSetTimeout = function(callback, delay, ...args) {
-                let d = norm(delay);
-                const aggressive = ConfigManager.load().FEATURES.CPU_TAMER_AGGRESSIVE;
-                if (aggressive && self.state.throttlingLevel === 2) d = Math.max(d, 500);
-                return self.originals.setTimeout.apply(targetWindow, [callback, d, ...args]);
-            };
-            applyOverride('setTimeout', this.wrappedSetTimeout);
-
-            // Erro fatal de escopo corrigido: A declaração `requestAnimationFrame` que faltava
-            this.wrappedRequestAnimationFrame = function(callback) {
-                const aggressive = ConfigManager.load().FEATURES.CPU_TAMER_AGGRESSIVE;
-                if (!aggressive) return self.originals.requestAnimationFrame.call(targetWindow, callback);
-                if (self.state.throttlingLevel > 0) {
-                    const id = 1000000 + ++self.rafFallbackId;
-                    const d = self.state.throttlingLevel === 1 ? 33 : 250;
-                    
-                    const tid = self.originals.setTimeout.apply(targetWindow, [() => {
-                        self.rafFallbackTimers.delete(id);
-                        callback((targetWindow.performance || performance).now());
-                    }, d]);
-                    
-                    self.rafFallbackTimers.set(id, tid);
-                    return id;
-                }
-                return self.originals.requestAnimationFrame.call(targetWindow, callback);
-            };
-            applyOverride('requestAnimationFrame', this.wrappedRequestAnimationFrame);
-
-            this.wrappedCancelAnimationFrame = function(id) {
-                if (self.rafFallbackTimers.has(id)) {
-                    self.originals.clearTimeout.call(targetWindow, self.rafFallbackTimers.get(id));
-                    self.rafFallbackTimers.delete(id);
-                    return;
-                }
-                if (typeof self.originals.cancelAnimationFrame === 'function') {
-                    return self.originals.cancelAnimationFrame.call(targetWindow, id);
-                }
-                self.originals.clearTimeout.call(targetWindow, id);
-            };
-            applyOverride('cancelAnimationFrame', this.wrappedCancelAnimationFrame);
-        }
+        cleanup() { this.stop(); }
     };
 
     // =======================================================
-    // 5. CLOCK MANAGER
+    // CLOCK MANAGER
     // =======================================================
     const ClockManager = {
         clockElement: null, interval: null, timeInterval: null, config: null, observer: null, playerElement: null, fullscreenHandler: null, navigationHandler: null,
@@ -807,7 +721,7 @@
             if (document.getElementById('yt-enhancer-clock')) return;
             const clock = document.createElement('div');
             clock.id = 'yt-enhancer-clock';
-            clock.style.cssText = `position: fixed !important; pointer-events: none !important; z-index: 2147483647 !important; font-family: "Roboto", sans-serif !important; font-weight: 400 !important; padding: 6px 14px !important; text-shadow: 0 1px 3px rgba(0,0,0,0.8) !important; display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.3) !important; transition: bottom 0.3s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s !important;`;
+            clock.style.cssText = `position: fixed !important; pointer-events: none !important; z-index: 20 !important; font-family: "Roboto", sans-serif !important; font-weight: 400 !important; padding: 6px 14px !important; text-shadow: 0 1px 3px rgba(0,0,0,0.8) !important; display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.3) !important; transition: bottom 0.3s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s !important;`;
             document.documentElement.appendChild(clock);
             this.clockElement = clock;
             this.updateStyle();
@@ -899,18 +813,13 @@
 
                 SettingsLauncher.registerSafeApi();
 
-                try { if (config.FEATURES.CPU_TAMER) SmartCpuTamer.init(); } catch (e) { console.error('[YT Enhancer] SmartCpuTamer init failed:', e); }
                 try { StyleManager.init(); StyleManager.apply(config); } catch (e) { console.error('[YT Enhancer] StyleManager init failed:', e); }
                 try { ShortsManager.init(config); } catch (e) { console.error('[YT Enhancer] ShortsManager init failed:', e); }
+                try { RelevantShelfManager.init(config); } catch (e) { console.error('[YT Enhancer] RelevantShelfManager init failed:', e); }
                 try { ClockManager.init(config); } catch (e) { console.error('[YT Enhancer] ClockManager init failed:', e); }
                 
-                EventBus.on('configChanged', (newConfig) => {
-                        if (newConfig.FEATURES.CPU_TAMER && !SmartCpuTamer.initialized) SmartCpuTamer.init();
-                        else if (!newConfig.FEATURES.CPU_TAMER && SmartCpuTamer.initialized) SmartCpuTamer.cleanup();
-                    });
-                
                 Utils.safeAddEventListener(window, 'beforeunload', () => {
-                    SmartCpuTamer.cleanup(); ClockManager.cleanup(); ShortsManager.cleanup(); Utils.DOMCache.refresh();
+                    ClockManager.cleanup(); ShortsManager.cleanup(); RelevantShelfManager.cleanup(); Utils.DOMCache.refresh();
                 });
 
                 log(`v${ConfigManager.CONFIG_VERSION} Iniciado com sucesso.`);
