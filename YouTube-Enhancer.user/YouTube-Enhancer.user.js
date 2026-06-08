@@ -749,14 +749,10 @@
             if (!this.observer) {
                 this.observer = new MutationObserver((mutations) => {
                     for (const mutation of mutations) {
-                        if (mutation.type === 'characterData') {
-                            this.queueRoot(mutation.target.parentElement);
-                        } else if (mutation.addedNodes.length > 0) {
-                            this.queueRoot(mutation.target);
-                        }
+                        if (mutation.addedNodes.length > 0) this.queueRoot(mutation.target);
                     }
                 });
-                this.observer.observe(Utils.getAppRoot(), { childList: true, subtree: true, characterData: true });
+                this.observer.observe(Utils.getAppRoot(), { childList: true, subtree: true });
             }
             if (this.listenersCleanup.length === 0) {
                 const rescan = () => this.queueRoot(Utils.getAppRoot());
@@ -864,6 +860,8 @@
         observer: null,
         observerCallback: null,
         playerElement: null,
+        observedMenuElements: null,
+        menuSelector: '.ytp-settings-menu, .ytp-contextmenu, .ytp-popup.ytp-contextmenu, .ytp-panel-menu',
         fullscreenHandler: null,
         navigationHandler: null,
         visibilityCleanup: null,
@@ -894,8 +892,7 @@
                 : document.fullscreenElement?.querySelector?.('#movie_player, .html5-video-player');
             const player = fullscreenPlayer || Utils.DOMCache.get('#movie_player', force) || Utils.DOMCache.get('.html5-video-player', force);
             if (player !== current) {
-                this.observer?.disconnect();
-                this.observer = null;
+                this.disconnectObservers();
                 this.visibilityCleanup?.();
                 this.visibilityCleanup = null;
                 this.playerElement = player || null;
@@ -937,16 +934,48 @@
                 fullscreenRoot.appendChild(this.clockElement);
             }
         },
+        disconnectObservers() {
+            this.observer?.disconnect();
+            this.observer = null;
+            this.observedMenuElements = null;
+        },
+        observePlayerMenus() {
+            if (!this.playerElement || !this.observer) return;
+            if (!this.observedMenuElements) this.observedMenuElements = new WeakSet();
+            Utils.queryWithin(this.playerElement, this.menuSelector).forEach((menu) => {
+                if (this.observedMenuElements.has(menu)) return;
+                this.observedMenuElements.add(menu);
+                this.observer.observe(menu, {
+                    attributes: true,
+                    attributeFilter: ['class', 'style', 'aria-hidden']
+                });
+            });
+        },
         setupObserver() {
             if (!this.playerElement || !this.config.FEATURES.FULLSCREEN_CLOCK) return;
-            this.observer?.disconnect();
-            this.observer = new MutationObserver(() => this.observerCallback());
+            this.disconnectObservers();
+            this.observer = new MutationObserver((mutations) => {
+                let shouldRefresh = false;
+                let shouldRescanMenus = false;
+
+                for (const mutation of mutations) {
+                    if (mutation.type === 'childList') {
+                        shouldRefresh = true;
+                        shouldRescanMenus = true;
+                    } else if (mutation.type === 'attributes') {
+                        shouldRefresh = true;
+                    }
+                }
+
+                if (shouldRescanMenus) this.observePlayerMenus();
+                if (shouldRefresh) this.observerCallback();
+            });
             this.observer.observe(this.playerElement, {
                 childList: true,
-                subtree: true,
                 attributes: true,
-                attributeFilter: ['class', 'style', 'aria-hidden']
+                attributeFilter: ['class']
             });
+            this.observePlayerMenus();
         },
         setupVisibilityListeners() {
             if (!this.playerElement || this.visibilityCleanup) return;
@@ -984,8 +1013,7 @@
         isPlayerMenuOpen() {
             const fullscreenRoot = document.fullscreenElement;
             if (!fullscreenRoot) return false;
-            const selectors = '.ytp-settings-menu, .ytp-contextmenu, .ytp-popup.ytp-contextmenu, .ytp-panel-menu';
-            return [...fullscreenRoot.querySelectorAll(selectors)].some((element) => {
+            return [...fullscreenRoot.querySelectorAll(this.menuSelector)].some((element) => {
                 const style = getComputedStyle(element);
                 return element.getClientRects().length > 0
                     && style.display !== 'none'
@@ -1050,8 +1078,7 @@
             }
         },
         stopRuntime() {
-            this.observer?.disconnect();
-            this.observer = null;
+            this.disconnectObservers();
             this.observerCallback?.cancel();
             this.visibilityCleanup?.();
             clearTimeout(this.updateTimer);
