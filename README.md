@@ -3,7 +3,7 @@
 > **Optimize, customize, and take control of your YouTube experience.**<br>
 > **Otimize, personalize e domine sua experiência no YouTube.**
 
-![Version](https://img.shields.io/badge/Version-2.4.0-blue)
+![Version](https://img.shields.io/badge/Version-2.5.0-blue)
 ![Language](https://img.shields.io/badge/Language-JavaScript-F7DF1E?logo=javascript&logoColor=F7DF1E)
 ![Author](https://img.shields.io/badge/Author-John%20Wiliam%20%26%20IA-orange)
 [![Install](https://img.shields.io/badge/Install-Click_Here-green)](https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js)
@@ -55,9 +55,9 @@ No code editing is required:
 
 - JavaScript (ES6+)
 - GM API (`GM_getValue`, `GM_setValue`, `GM_registerMenuCommand`)
-- Dynamic CSS injection
-- Mutation observers for YouTube SPA updates
-- DOM caching and lifecycle cleanup
+- Critical CSS injection at `document-start`
+- Incremental mutation processing for YouTube SPA updates
+- `requestAnimationFrame` throttling, DOM caching, and lifecycle cleanup
 
 ### 📝 Credits
 
@@ -108,9 +108,9 @@ Não é necessário editar o código:
 
 - JavaScript (ES6+)
 - API GM (`GM_getValue`, `GM_setValue`, `GM_registerMenuCommand`)
-- Injeção dinâmica de CSS
-- Observadores de mutação para atualizações da SPA do YouTube
-- Cache de DOM e limpeza de ciclo de vida
+- Injeção de CSS crítico em `document-start`
+- Processamento incremental de mutações para atualizações da SPA do YouTube
+- Throttle com `requestAnimationFrame`, cache de DOM e limpeza de ciclo de vida
 
 ### 📝 Créditos
 

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      2.4.0
+// @version      2.5.0
 // @description  Personaliza o layout, remove elementos indesejados e adiciona um relógio em tela cheia.
 // @author       John Wiliam & IA
 // @match        *://*.youtube.com/*
@@ -19,7 +19,7 @@
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = '2.4.0';
+    const SCRIPT_VERSION = '2.5.0';
     const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
     if (window[FLAG]) return;
     window[FLAG] = true;
@@ -99,6 +99,24 @@
                 timeout = null;
             };
             return debounced;
+        },
+        rafThrottle(func) {
+            let frameId = null;
+            let latestArgs = [];
+            const throttled = function(...args) {
+                latestArgs = args;
+                if (frameId !== null) return;
+                frameId = requestAnimationFrame(() => {
+                    frameId = null;
+                    func.apply(this, latestArgs);
+                });
+            };
+            throttled.cancel = () => {
+                if (frameId !== null) cancelAnimationFrame(frameId);
+                frameId = null;
+                latestArgs = [];
+            };
+            return throttled;
         },
         DOMCache: {
             cache: new Map(),
@@ -183,10 +201,10 @@
     };
 
     const ConfigManager = {
-        CONFIG_VERSION: '2.4.0',
+        CONFIG_VERSION: '2.5.0',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
-            version: '2.4.0', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
+            version: '2.5.0', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
             FEATURES: { LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, REMOVE_RELEVANT: true, FULLSCREEN_CLOCK: true },
             CLOCK_STYLE: { color: '#ffffff', bgColor: '#000000', bgOpacity: 0.3, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
@@ -544,26 +562,31 @@
     // =======================================================
     const StyleManager = {
         styleId: 'yt-enhancer-styles',
-        cleanupFunctions: [],
+        eventCleanup: null,
+        lastCss: null,
         init() {
-            this.cleanupFunctions.push(
-                EventBus.on('configChanged', (config) => this.apply(config)),
-                Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.apply(ConfigManager.load()))
-            );
+            if (!this.eventCleanup) this.eventCleanup = EventBus.on('configChanged', (config) => this.apply(config));
         },
-        apply(config) {
-            let css = '';
+        buildCss(config) {
+            const rules = [];
             if (config.FEATURES.LAYOUT_ENHANCEMENT) {
-                css += `ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${config.VIDEOS_PER_ROW} !important; } @media (max-width: 1200px) { ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${Math.min(config.VIDEOS_PER_ROW, 4)} !important; } }`;
+                rules.push(`ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${config.VIDEOS_PER_ROW} !important; } @media (max-width: 1200px) { ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${Math.min(config.VIDEOS_PER_ROW, 4)} !important; } }`);
             }
             if (config.FEATURES.SHORTS_REMOVAL) {
-                css += `ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]), ytd-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]), ytd-mini-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]) { display: none !important; }`;
+                rules.push(`ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]), ytd-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]), ytd-mini-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]) { display: none !important; }`);
             }
+            return rules.join('');
+        },
+        apply(config) {
+            const css = this.buildCss(config);
+            if (css === this.lastCss && document.getElementById(this.styleId)?.isConnected) return;
+            this.lastCss = css;
             Utils.injectCSS(css, this.styleId);
         },
         cleanup() {
-            this.cleanupFunctions.forEach((cleanup) => cleanup());
-            this.cleanupFunctions = [];
+            this.eventCleanup?.();
+            this.eventCleanup = null;
+            this.lastCss = null;
             document.getElementById(this.styleId)?.remove();
         }
     };
@@ -578,11 +601,14 @@
         hiddenElements: new Set(),
         previousDisplay: new WeakMap(),
         enabled: false,
-        debouncedPrune: null,
+        scheduledScan: null,
+        shelfSelector: 'ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]',
+        markerSelector: 'ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]',
+        linkSelector: 'a[href="/shorts"], a[href^="/shorts/"]',
         init(config) {
-            this.debouncedPrune = Utils.debounce(() => {
-                if (this.enabled) this.prune();
-            }, 250);
+            this.scheduledScan = Utils.rafThrottle(() => {
+                if (this.enabled) this.scan(document);
+            });
             this.eventCleanup = EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
             this.updateConfig(config);
         },
@@ -595,27 +621,36 @@
         },
         start() {
             if (!document.documentElement) return;
-            this.prune();
+            this.scan(document);
             if (!this.observer) {
-                this.observer = new MutationObserver(() => this.debouncedPrune());
-                const targetNode = document.querySelector('ytd-app') || document.body;
-                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
+                this.observer = new MutationObserver((mutations) => this.handleMutations(mutations));
+                const targetNode = document.querySelector('ytd-app') || document.body || document.documentElement;
+                this.observer.observe(targetNode, { childList: true, subtree: true });
             }
             if (this.listenersCleanup.length === 0) {
                 this.listenersCleanup.push(
-                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune())
+                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.scheduledScan()),
+                    Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.scheduledScan()),
+                    Utils.safeAddEventListener(window, 'popstate', () => this.scheduledScan())
                 );
             }
         },
         stop() {
             this.observer?.disconnect();
             this.observer = null;
-            this.debouncedPrune?.cancel();
+            this.scheduledScan?.cancel();
             this.listenersCleanup.forEach((cleanup) => cleanup());
             this.listenersCleanup = [];
             this.restoreHiddenElements();
+        },
+        handleMutations(mutations) {
+            if (!this.enabled) return;
+            for (const mutation of mutations) {
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType === Node.ELEMENT_NODE) this.scan(node);
+                }
+            }
+            this.releaseDisconnected();
         },
         markHidden(element) {
             if (!(element instanceof HTMLElement) || this.hiddenElements.has(element)) return;
@@ -625,6 +660,13 @@
             });
             element.style.setProperty('display', 'none', 'important');
             this.hiddenElements.add(element);
+        },
+        releaseDisconnected() {
+            for (const element of this.hiddenElements) {
+                if (element.isConnected) continue;
+                this.hiddenElements.delete(element);
+                this.previousDisplay.delete(element);
+            }
         },
         restoreHiddenElements() {
             for (const element of this.hiddenElements) {
@@ -640,34 +682,32 @@
             }
             this.hiddenElements.clear();
         },
-        prune() {
-            for (const element of this.hiddenElements) {
-                if (!element.isConnected) {
-                    this.hiddenElements.delete(element);
-                    this.previousDisplay.delete(element);
-                }
-            }
-            if (!this.enabled) return;
-
-            const elementsToHide = new Set();
-            document.querySelectorAll('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach((shelf) => {
-                elementsToHide.add(shelf.closest('ytd-rich-section-renderer') || shelf);
+        queryIncludingRoot(root, selector) {
+            const matches = [];
+            if (root instanceof Element && root.matches(selector)) matches.push(root);
+            if (typeof root.querySelectorAll === 'function') matches.push(...root.querySelectorAll(selector));
+            return matches;
+        },
+        scan(root) {
+            if (!this.enabled || !root) return;
+            this.queryIncludingRoot(root, this.shelfSelector).forEach((shelf) => {
+                this.markHidden(shelf.closest('ytd-rich-section-renderer') || shelf);
             });
-            document.querySelectorAll('ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach((marker) => {
+            this.queryIncludingRoot(root, this.markerSelector).forEach((marker) => {
                 const item = marker.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer');
-                if (item) elementsToHide.add(item);
+                if (item) this.markHidden(item);
             });
-            document.querySelectorAll('a[href="/shorts"], a[href^="/shorts/"]').forEach((link) => {
+            this.queryIncludingRoot(root, this.linkSelector).forEach((link) => {
                 const item = link.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item, ytd-reel-item-renderer, ytd-rich-item-renderer');
-                if (item) elementsToHide.add(item);
+                if (item) this.markHidden(item);
             });
-            elementsToHide.forEach((element) => this.markHidden(element));
+            this.releaseDisconnected();
         },
         cleanup() {
             this.stop();
             this.eventCleanup?.();
             this.eventCleanup = null;
-            this.debouncedPrune = null;
+            this.scheduledScan = null;
         }
     };
 
@@ -681,10 +721,11 @@
         hiddenElements: new Set(),
         previousDisplay: new WeakMap(),
         enabled: false,
-        debouncedPrune: null,
+        scheduledScan: null,
         relevantTitles: new Set(['most relevant', 'mais relevantes']),
+        shelfSelector: 'ytd-rich-shelf-renderer',
         init(config) {
-            this.debouncedPrune = Utils.debounce(() => this.prune(), 250);
+            this.scheduledScan = Utils.rafThrottle(() => this.scan(document));
             this.eventCleanup = EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
             this.updateConfig(config);
         },
@@ -697,24 +738,24 @@
         },
         start() {
             if (!document.documentElement) return;
-            this.prune();
+            this.scan(document);
             if (!this.observer) {
-                this.observer = new MutationObserver(() => this.debouncedPrune());
-                const targetNode = document.querySelector('ytd-app') || document.body;
-                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
+                this.observer = new MutationObserver((mutations) => this.handleMutations(mutations));
+                const targetNode = document.querySelector('ytd-app') || document.body || document.documentElement;
+                this.observer.observe(targetNode, { childList: true, subtree: true, characterData: true });
             }
             if (this.listenersCleanup.length === 0) {
                 this.listenersCleanup.push(
-                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune())
+                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.scheduledScan()),
+                    Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.scheduledScan()),
+                    Utils.safeAddEventListener(window, 'popstate', () => this.scheduledScan())
                 );
             }
         },
         stop() {
             this.observer?.disconnect();
             this.observer = null;
-            this.debouncedPrune?.cancel();
+            this.scheduledScan?.cancel();
             this.listenersCleanup.forEach((cleanup) => cleanup());
             this.listenersCleanup = [];
             this.restoreHiddenElements();
@@ -723,14 +764,8 @@
             return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
         },
         isRelevantShelf(shelf) {
-            const titleSelectors = [
-                ':scope #rich-shelf-header #title',
-                ':scope #title-container > #title',
-                ':scope .rich-shelf-header #title'
-            ];
-            return titleSelectors.some((selector) => [...shelf.querySelectorAll(selector)].some((title) => (
-                this.relevantTitles.has(this.normalizeTitle(title.textContent || ''))
-            )));
+            const titles = shelf.querySelectorAll('#rich-shelf-header #title, #title-container > #title, .rich-shelf-header #title');
+            return [...titles].some((title) => this.relevantTitles.has(this.normalizeTitle(title.textContent || '')));
         },
         markHidden(element) {
             if (!(element instanceof HTMLElement) || this.hiddenElements.has(element)) return;
@@ -740,6 +775,13 @@
             });
             element.style.setProperty('display', 'none', 'important');
             this.hiddenElements.add(element);
+        },
+        releaseDisconnected() {
+            for (const element of this.hiddenElements) {
+                if (element.isConnected) continue;
+                this.hiddenElements.delete(element);
+                this.previousDisplay.delete(element);
+            }
         },
         restoreHiddenElements() {
             for (const element of this.hiddenElements) {
@@ -755,28 +797,41 @@
             }
             this.hiddenElements.clear();
         },
-        prune() {
-            for (const element of this.hiddenElements) {
-                if (!element.isConnected) {
-                    this.hiddenElements.delete(element);
-                    this.previousDisplay.delete(element);
-                }
-            }
+        inspectShelf(shelf) {
+            if (shelf && this.isRelevantShelf(shelf)) this.markHidden(shelf.closest('ytd-rich-section-renderer') || shelf);
+        },
+        handleMutations(mutations) {
             if (!this.enabled || location.pathname !== '/feed/subscriptions') {
-                this.restoreHiddenElements();
+                if (this.hiddenElements.size) this.restoreHiddenElements();
                 return;
             }
-
-            document.querySelectorAll('ytd-rich-shelf-renderer').forEach((shelf) => {
-                if (!this.isRelevantShelf(shelf)) return;
-                this.markHidden(shelf.closest('ytd-rich-section-renderer') || shelf);
-            });
+            for (const mutation of mutations) {
+                const targetElement = mutation.target.nodeType === Node.ELEMENT_NODE
+                    ? mutation.target
+                    : mutation.target.parentElement;
+                this.inspectShelf(targetElement?.closest?.(this.shelfSelector));
+                for (const node of mutation.addedNodes) {
+                    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                    if (node.matches(this.shelfSelector)) this.inspectShelf(node);
+                    node.querySelectorAll?.(this.shelfSelector).forEach((shelf) => this.inspectShelf(shelf));
+                    this.inspectShelf(node.closest?.(this.shelfSelector));
+                }
+            }
+            this.releaseDisconnected();
+        },
+        scan(root) {
+            this.releaseDisconnected();
+            if (!this.enabled || location.pathname !== '/feed/subscriptions') {
+                if (this.hiddenElements.size) this.restoreHiddenElements();
+                return;
+            }
+            root.querySelectorAll?.(this.shelfSelector).forEach((shelf) => this.inspectShelf(shelf));
         },
         cleanup() {
             this.stop();
             this.eventCleanup?.();
             this.eventCleanup = null;
-            this.debouncedPrune = null;
+            this.scheduledScan = null;
         }
     };
 
@@ -795,10 +850,10 @@
         eventCleanup: null,
         init(config) {
             this.config = config;
-            this.observerCallback = Utils.debounce(() => {
+            this.observerCallback = Utils.rafThrottle(() => {
                 this.adjustPosition();
                 this.refreshVisibility();
-            }, 100);
+            });
             this.eventCleanup = EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
             this.fullscreenHandler = () => this.handleFullscreen();
             this.navigationHandler = () => {
@@ -857,7 +912,17 @@
         setupObserver() {
             if (!this.playerElement || !this.config.FEATURES.FULLSCREEN_CLOCK) return;
             this.observer?.disconnect();
-            this.observer = new MutationObserver(() => this.observerCallback());
+            this.observer = new MutationObserver((mutations) => {
+                const hasRelevantChange = mutations.some((mutation) => {
+                    if (mutation.target === this.clockElement || this.clockElement?.contains(mutation.target)) return false;
+                    if (mutation.type === 'attributes') {
+                        return mutation.target === this.playerElement
+                            || mutation.target.matches?.('.ytp-settings-menu, .ytp-contextmenu, .ytp-popup, .ytp-panel-menu');
+                    }
+                    return mutation.addedNodes.length > 0 || mutation.removedNodes.length > 0;
+                });
+                if (hasRelevantChange) this.observerCallback();
+            });
             this.observer.observe(this.playerElement, {
                 childList: true,
                 subtree: true,
@@ -869,9 +934,12 @@
             if (!this.clockElement) return;
             if (!this.playerElement?.isConnected) this.resolvePlayerElement(true);
             if (!this.playerElement) return;
-            const controlsVisible = !this.playerElement.classList.contains('ytp-autohide');
+            const controlsVisible = document.fullscreenElement
+                && !this.playerElement.classList.contains('ytp-autohide')
+                && !this.playerElement.classList.contains('ytp-autohide-active');
             const margin = this.config.CLOCK_STYLE.margin;
-            this.clockElement.style.bottom = `${controlsVisible ? margin + 110 : margin}px`;
+            const nextBottom = `${controlsVisible ? margin + 110 : margin}px`;
+            if (this.clockElement.style.bottom !== nextBottom) this.clockElement.style.bottom = nextBottom;
         },
         isPlayerMenuOpen() {
             const fullscreenRoot = document.fullscreenElement;
@@ -1032,6 +1100,9 @@
 
 
     if (BootstrapGate.evaluate().shouldInit) {
+        // Critical CSS is injected at document-start so the grid and selector-based
+        // removals are active before YouTube finishes progressive hydration.
+        StyleManager.apply(ConfigManager.load());
         SettingsLauncher.registerMenuCommand();
         if (document.readyState === 'loading') {
             Utils.safeAddEventListener(document, 'DOMContentLoaded', () => {
