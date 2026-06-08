@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      2.4.0
+// @version      2.5.0
 // @description  Personaliza o layout, remove elementos indesejados e adiciona um relógio em tela cheia.
 // @author       John Wiliam & IA
 // @match        *://*.youtube.com/*
@@ -19,7 +19,7 @@
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = '2.4.0';
+    const SCRIPT_VERSION = '2.5.0';
     const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
     if (window[FLAG]) return;
     window[FLAG] = true;
@@ -100,6 +100,38 @@
             };
             return debounced;
         },
+        rafThrottle(func) {
+            let frameId = null;
+            let latestArgs = null;
+            let latestContext = null;
+            const throttled = function(...args) {
+                latestArgs = args;
+                latestContext = this;
+                if (frameId !== null) return;
+                frameId = requestAnimationFrame(() => {
+                    frameId = null;
+                    const callArgs = latestArgs;
+                    const callContext = latestContext;
+                    latestArgs = null;
+                    latestContext = null;
+                    func.apply(callContext, callArgs);
+                });
+            };
+            throttled.cancel = () => {
+                if (frameId !== null) cancelAnimationFrame(frameId);
+                frameId = null;
+                latestArgs = null;
+                latestContext = null;
+            };
+            return throttled;
+        },
+        queryWithin(root, selector) {
+            if (!(root instanceof Element) && root !== document) return [];
+            const matches = [];
+            if (root instanceof Element && root.matches(selector)) matches.push(root);
+            root.querySelectorAll?.(selector).forEach((element) => matches.push(element));
+            return matches;
+        },
         DOMCache: {
             cache: new Map(),
             get(selector, force = false) {
@@ -136,8 +168,11 @@
         },
         injectCSS(css, id) {
             try {
-                const old = document.getElementById(id);
-                if (old) old.remove();
+                const existing = id ? document.getElementById(id) : null;
+                if (existing) {
+                    if (existing.textContent !== css) existing.textContent = css;
+                    return true;
+                }
 
                 let styleEl = null;
                 if (typeof GM_addStyle === 'function') {
@@ -183,10 +218,10 @@
     };
 
     const ConfigManager = {
-        CONFIG_VERSION: '2.4.0',
+        CONFIG_VERSION: '2.5.0',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
-            version: '2.4.0', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
+            version: '2.5.0', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
             FEATURES: { LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, REMOVE_RELEVANT: true, FULLSCREEN_CLOCK: true },
             CLOCK_STYLE: { color: '#ffffff', bgColor: '#000000', bgOpacity: 0.3, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
@@ -545,25 +580,29 @@
     const StyleManager = {
         styleId: 'yt-enhancer-styles',
         cleanupFunctions: [],
+        lastCss: null,
         init() {
-            this.cleanupFunctions.push(
-                EventBus.on('configChanged', (config) => this.apply(config)),
-                Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.apply(ConfigManager.load()))
-            );
+            this.cleanupFunctions.push(EventBus.on('configChanged', (config) => this.apply(config)));
         },
-        apply(config) {
-            let css = '';
+        buildCss(config) {
+            const rules = [];
             if (config.FEATURES.LAYOUT_ENHANCEMENT) {
-                css += `ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${config.VIDEOS_PER_ROW} !important; } @media (max-width: 1200px) { ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${Math.min(config.VIDEOS_PER_ROW, 4)} !important; } }`;
+                rules.push(`ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${config.VIDEOS_PER_ROW} !important; } @media (max-width: 1200px) { ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${Math.min(config.VIDEOS_PER_ROW, 4)} !important; } }`);
             }
             if (config.FEATURES.SHORTS_REMOVAL) {
-                css += `ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]), ytd-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]), ytd-mini-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]) { display: none !important; }`;
+                rules.push(`ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]), ytd-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]), ytd-mini-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]) { display: none !important; }`);
             }
-            Utils.injectCSS(css, this.styleId);
+            return rules.join('');
+        },
+        apply(config) {
+            const css = this.buildCss(config);
+            if (css === this.lastCss && document.getElementById(this.styleId)) return;
+            if (Utils.injectCSS(css, this.styleId)) this.lastCss = css;
         },
         cleanup() {
             this.cleanupFunctions.forEach((cleanup) => cleanup());
             this.cleanupFunctions = [];
+            this.lastCss = null;
             document.getElementById(this.styleId)?.remove();
         }
     };
@@ -578,11 +617,15 @@
         hiddenElements: new Set(),
         previousDisplay: new WeakMap(),
         enabled: false,
-        debouncedPrune: null,
+        pendingRoots: new Set(),
+        scheduledPrune: null,
+        selectors: {
+            shelves: 'ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]',
+            markers: 'ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]',
+            links: 'a[href="/shorts"], a[href^="/shorts/"]'
+        },
         init(config) {
-            this.debouncedPrune = Utils.debounce(() => {
-                if (this.enabled) this.prune();
-            }, 250);
+            this.scheduledPrune = Utils.rafThrottle(() => this.flushPendingRoots());
             this.eventCleanup = EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
             this.updateConfig(config);
         },
@@ -595,24 +638,37 @@
         },
         start() {
             if (!document.documentElement) return;
-            this.prune();
+            this.prune(document);
             if (!this.observer) {
-                this.observer = new MutationObserver(() => this.debouncedPrune());
-                const targetNode = document.querySelector('ytd-app') || document.body;
-                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
+                this.observer = new MutationObserver((mutations) => {
+                    if (!this.enabled) return;
+                    for (const mutation of mutations) {
+                        mutation.addedNodes.forEach((node) => {
+                            if (node instanceof Element) this.pendingRoots.add(node);
+                        });
+                    }
+                    if (this.pendingRoots.size) this.scheduledPrune();
+                    this.releaseDetachedElements();
+                });
+                this.observer.observe(document.querySelector('ytd-app') || document.documentElement, { childList: true, subtree: true });
             }
             if (this.listenersCleanup.length === 0) {
+                const scheduleFullPrune = () => {
+                    this.pendingRoots.add(document);
+                    this.scheduledPrune();
+                };
                 this.listenersCleanup.push(
-                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune())
+                    Utils.safeAddEventListener(document, 'yt-navigate-finish', scheduleFullPrune),
+                    Utils.safeAddEventListener(document, 'yt-page-data-updated', scheduleFullPrune),
+                    Utils.safeAddEventListener(window, 'popstate', scheduleFullPrune)
                 );
             }
         },
         stop() {
             this.observer?.disconnect();
             this.observer = null;
-            this.debouncedPrune?.cancel();
+            this.scheduledPrune?.cancel();
+            this.pendingRoots.clear();
             this.listenersCleanup.forEach((cleanup) => cleanup());
             this.listenersCleanup = [];
             this.restoreHiddenElements();
@@ -625,6 +681,14 @@
             });
             element.style.setProperty('display', 'none', 'important');
             this.hiddenElements.add(element);
+        },
+        releaseDetachedElements() {
+            for (const element of this.hiddenElements) {
+                if (!element.isConnected) {
+                    this.hiddenElements.delete(element);
+                    this.previousDisplay.delete(element);
+                }
+            }
         },
         restoreHiddenElements() {
             for (const element of this.hiddenElements) {
@@ -640,34 +704,31 @@
             }
             this.hiddenElements.clear();
         },
-        prune() {
-            for (const element of this.hiddenElements) {
-                if (!element.isConnected) {
-                    this.hiddenElements.delete(element);
-                    this.previousDisplay.delete(element);
-                }
-            }
+        flushPendingRoots() {
             if (!this.enabled) return;
-
-            const elementsToHide = new Set();
-            document.querySelectorAll('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach((shelf) => {
-                elementsToHide.add(shelf.closest('ytd-rich-section-renderer') || shelf);
+            const roots = [...this.pendingRoots];
+            this.pendingRoots.clear();
+            roots.forEach((root) => this.prune(root));
+        },
+        prune(root = document) {
+            if (!this.enabled) return;
+            Utils.queryWithin(root, this.selectors.shelves).forEach((shelf) => {
+                this.markHidden(shelf.closest('ytd-rich-section-renderer') || shelf);
             });
-            document.querySelectorAll('ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach((marker) => {
+            Utils.queryWithin(root, this.selectors.markers).forEach((marker) => {
                 const item = marker.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer');
-                if (item) elementsToHide.add(item);
+                if (item) this.markHidden(item);
             });
-            document.querySelectorAll('a[href="/shorts"], a[href^="/shorts/"]').forEach((link) => {
+            Utils.queryWithin(root, this.selectors.links).forEach((link) => {
                 const item = link.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item, ytd-reel-item-renderer, ytd-rich-item-renderer');
-                if (item) elementsToHide.add(item);
+                if (item) this.markHidden(item);
             });
-            elementsToHide.forEach((element) => this.markHidden(element));
         },
         cleanup() {
             this.stop();
             this.eventCleanup?.();
             this.eventCleanup = null;
-            this.debouncedPrune = null;
+            this.scheduledPrune = null;
         }
     };
 
@@ -681,10 +742,10 @@
         hiddenElements: new Set(),
         previousDisplay: new WeakMap(),
         enabled: false,
-        debouncedPrune: null,
+        retryFrame: null,
         relevantTitles: new Set(['most relevant', 'mais relevantes']),
+        shelfSelector: 'ytd-rich-shelf-renderer',
         init(config) {
-            this.debouncedPrune = Utils.debounce(() => this.prune(), 250);
             this.eventCleanup = EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
             this.updateConfig(config);
         },
@@ -697,24 +758,29 @@
         },
         start() {
             if (!document.documentElement) return;
-            this.prune();
+            this.prune(document);
             if (!this.observer) {
-                this.observer = new MutationObserver(() => this.debouncedPrune());
-                const targetNode = document.querySelector('ytd-app') || document.body;
-                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
+                this.observer = new MutationObserver((mutations) => this.handleMutations(mutations));
+                this.observer.observe(document.querySelector('ytd-app') || document.documentElement, {
+                    childList: true,
+                    subtree: true,
+                    characterData: true
+                });
             }
             if (this.listenersCleanup.length === 0) {
+                const pruneNow = () => this.prune(document);
                 this.listenersCleanup.push(
-                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune())
+                    Utils.safeAddEventListener(document, 'yt-navigate-finish', pruneNow),
+                    Utils.safeAddEventListener(document, 'yt-page-data-updated', pruneNow),
+                    Utils.safeAddEventListener(window, 'popstate', pruneNow)
                 );
             }
         },
         stop() {
             this.observer?.disconnect();
             this.observer = null;
-            this.debouncedPrune?.cancel();
+            if (this.retryFrame !== null) cancelAnimationFrame(this.retryFrame);
+            this.retryFrame = null;
             this.listenersCleanup.forEach((cleanup) => cleanup());
             this.listenersCleanup = [];
             this.restoreHiddenElements();
@@ -741,6 +807,14 @@
             element.style.setProperty('display', 'none', 'important');
             this.hiddenElements.add(element);
         },
+        releaseDetachedElements() {
+            for (const element of this.hiddenElements) {
+                if (!element.isConnected) {
+                    this.hiddenElements.delete(element);
+                    this.previousDisplay.delete(element);
+                }
+            }
+        },
         restoreHiddenElements() {
             for (const element of this.hiddenElements) {
                 if (!(element instanceof HTMLElement)) continue;
@@ -755,28 +829,55 @@
             }
             this.hiddenElements.clear();
         },
-        prune() {
-            for (const element of this.hiddenElements) {
-                if (!element.isConnected) {
-                    this.hiddenElements.delete(element);
-                    this.previousDisplay.delete(element);
-                }
-            }
-            if (!this.enabled || location.pathname !== '/feed/subscriptions') {
-                this.restoreHiddenElements();
+        handleMutations(mutations) {
+            if (!this.enabled) return;
+            this.releaseDetachedElements();
+            if (location.pathname !== '/feed/subscriptions') {
+                if (this.hiddenElements.size) this.restoreHiddenElements();
                 return;
             }
 
-            document.querySelectorAll('ytd-rich-shelf-renderer').forEach((shelf) => {
-                if (!this.isRelevantShelf(shelf)) return;
-                this.markHidden(shelf.closest('ytd-rich-section-renderer') || shelf);
-            });
+            const candidates = new Set();
+            for (const mutation of mutations) {
+                const targetElement = mutation.target.nodeType === Node.TEXT_NODE
+                    ? mutation.target.parentElement
+                    : mutation.target;
+                const ancestorShelf = targetElement?.closest?.(this.shelfSelector);
+                if (ancestorShelf) candidates.add(ancestorShelf);
+                mutation.addedNodes.forEach((node) => {
+                    if (node instanceof Element) {
+                        const ownShelf = node.matches(this.shelfSelector) ? node : node.closest(this.shelfSelector);
+                        if (ownShelf) candidates.add(ownShelf);
+                        node.querySelectorAll?.(this.shelfSelector).forEach((shelf) => candidates.add(shelf));
+                    }
+                });
+            }
+            candidates.forEach((shelf) => this.hideIfRelevant(shelf));
+
+            if (candidates.size && this.retryFrame === null) {
+                this.retryFrame = requestAnimationFrame(() => {
+                    this.retryFrame = null;
+                    candidates.forEach((shelf) => {
+                        if (shelf.isConnected) this.hideIfRelevant(shelf);
+                    });
+                });
+            }
+        },
+        hideIfRelevant(shelf) {
+            if (this.isRelevantShelf(shelf)) this.markHidden(shelf.closest('ytd-rich-section-renderer') || shelf);
+        },
+        prune(root = document) {
+            this.releaseDetachedElements();
+            if (!this.enabled || location.pathname !== '/feed/subscriptions') {
+                if (this.hiddenElements.size) this.restoreHiddenElements();
+                return;
+            }
+            Utils.queryWithin(root, this.shelfSelector).forEach((shelf) => this.hideIfRelevant(shelf));
         },
         cleanup() {
             this.stop();
             this.eventCleanup?.();
             this.eventCleanup = null;
-            this.debouncedPrune = null;
         }
     };
 
@@ -790,15 +891,16 @@
         observer: null,
         observerCallback: null,
         playerElement: null,
+        playerListenersCleanup: [],
         fullscreenHandler: null,
         navigationHandler: null,
         eventCleanup: null,
         init(config) {
             this.config = config;
-            this.observerCallback = Utils.debounce(() => {
+            this.observerCallback = Utils.rafThrottle(() => {
                 this.adjustPosition();
                 this.refreshVisibility();
-            }, 100);
+            });
             this.eventCleanup = EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
             this.fullscreenHandler = () => this.handleFullscreen();
             this.navigationHandler = () => {
@@ -818,6 +920,8 @@
             if (player !== current) {
                 this.observer?.disconnect();
                 this.observer = null;
+                this.playerListenersCleanup.forEach((cleanup) => cleanup());
+                this.playerListenersCleanup = [];
                 this.playerElement = player || null;
                 if (this.playerElement) this.setupObserver();
             } else if (!player) {
@@ -857,13 +961,21 @@
         setupObserver() {
             if (!this.playerElement || !this.config.FEATURES.FULLSCREEN_CLOCK) return;
             this.observer?.disconnect();
+            this.playerListenersCleanup.forEach((cleanup) => cleanup());
+            this.playerListenersCleanup = [];
             this.observer = new MutationObserver(() => this.observerCallback());
             this.observer.observe(this.playerElement, {
-                childList: true,
-                subtree: true,
                 attributes: true,
-                attributeFilter: ['class', 'style', 'aria-hidden']
+                attributeFilter: ['class']
             });
+            const scheduleRefresh = () => this.observerCallback();
+            this.playerListenersCleanup.push(
+                Utils.safeAddEventListener(this.playerElement, 'pointermove', scheduleRefresh, { passive: true }),
+                Utils.safeAddEventListener(this.playerElement, 'pointerleave', scheduleRefresh, { passive: true }),
+                Utils.safeAddEventListener(this.playerElement, 'click', scheduleRefresh, { capture: true, passive: true }),
+                Utils.safeAddEventListener(this.playerElement, 'contextmenu', scheduleRefresh, { capture: true, passive: true }),
+                Utils.safeAddEventListener(this.playerElement, 'keydown', scheduleRefresh, { capture: true })
+            );
         },
         adjustPosition() {
             if (!this.clockElement) return;
@@ -871,7 +983,18 @@
             if (!this.playerElement) return;
             const controlsVisible = !this.playerElement.classList.contains('ytp-autohide');
             const margin = this.config.CLOCK_STYLE.margin;
-            this.clockElement.style.bottom = `${controlsVisible ? margin + 110 : margin}px`;
+            let bottom = margin;
+            if (controlsVisible && document.fullscreenElement) {
+                const controls = this.playerElement.querySelector('.ytp-chrome-bottom');
+                const controlsRect = controls?.getBoundingClientRect();
+                const fullscreenRect = document.fullscreenElement.getBoundingClientRect();
+                const controlsHeight = controlsRect && controlsRect.height > 0
+                    ? Math.max(0, fullscreenRect.bottom - controlsRect.top)
+                    : 80;
+                bottom = margin + controlsHeight;
+            }
+            const nextBottom = `${Math.round(bottom)}px`;
+            if (this.clockElement.style.bottom !== nextBottom) this.clockElement.style.bottom = nextBottom;
         },
         isPlayerMenuOpen() {
             const fullscreenRoot = document.fullscreenElement;
@@ -945,6 +1068,8 @@
         stopRuntime() {
             this.observer?.disconnect();
             this.observer = null;
+            this.playerListenersCleanup.forEach((cleanup) => cleanup());
+            this.playerListenersCleanup = [];
             this.observerCallback?.cancel();
             clearTimeout(this.updateTimer);
             this.updateTimer = null;
@@ -1033,15 +1158,7 @@
 
     if (BootstrapGate.evaluate().shouldInit) {
         SettingsLauncher.registerMenuCommand();
-        if (document.readyState === 'loading') {
-            Utils.safeAddEventListener(document, 'DOMContentLoaded', () => {
-                SettingsLauncher.registerMenuCommand();
-                EnhancerCore.init();
-            });
-        } else {
-            SettingsLauncher.registerMenuCommand();
-            EnhancerCore.init();
-        }
+        EnhancerCore.init();
     }
 
 })();
