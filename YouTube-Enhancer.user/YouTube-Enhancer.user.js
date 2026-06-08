@@ -749,14 +749,10 @@
             if (!this.observer) {
                 this.observer = new MutationObserver((mutations) => {
                     for (const mutation of mutations) {
-                        if (mutation.type === 'characterData') {
-                            this.queueRoot(mutation.target.parentElement);
-                        } else if (mutation.addedNodes.length > 0) {
-                            this.queueRoot(mutation.target);
-                        }
+                        if (mutation.addedNodes.length > 0) this.queueRoot(mutation.target);
                     }
                 });
-                this.observer.observe(Utils.getAppRoot(), { childList: true, subtree: true, characterData: true });
+                this.observer.observe(Utils.getAppRoot(), { childList: true, subtree: true });
             }
             if (this.listenersCleanup.length === 0) {
                 const rescan = () => this.queueRoot(Utils.getAppRoot());
@@ -868,6 +864,7 @@
         navigationHandler: null,
         visibilityCleanup: null,
         eventCleanup: null,
+        menuSelector: '.ytp-settings-menu, .ytp-contextmenu, .ytp-popup.ytp-contextmenu, .ytp-panel-menu',
         init(config) {
             this.config = config;
             this.observerCallback = Utils.scheduleFrame(() => {
@@ -940,10 +937,41 @@
         setupObserver() {
             if (!this.playerElement || !this.config.FEATURES.FULLSCREEN_CLOCK) return;
             this.observer?.disconnect();
-            this.observer = new MutationObserver(() => this.observerCallback());
+            this.observer = new MutationObserver((mutations) => {
+                let affectsClock = false;
+                for (const mutation of mutations) {
+                    if (mutation.type === 'attributes') {
+                        if (mutation.target === this.playerElement || mutation.target.matches?.(this.menuSelector)) {
+                            affectsClock = true;
+                        }
+                        continue;
+                    }
+                    for (const node of mutation.addedNodes) {
+                        if (!(node instanceof Element)) continue;
+                        const menus = Utils.queryWithin(node, this.menuSelector);
+                        if (menus.length === 0) continue;
+                        menus.forEach((menu) => this.observeMenu(menu));
+                        affectsClock = true;
+                    }
+                    if (!affectsClock) {
+                        affectsClock = [...mutation.removedNodes].some((node) => (
+                            node instanceof Element
+                            && (node.matches(this.menuSelector) || node.querySelector(this.menuSelector))
+                        ));
+                    }
+                }
+                if (affectsClock) this.observerCallback();
+            });
             this.observer.observe(this.playerElement, {
                 childList: true,
                 subtree: true,
+                attributes: true,
+                attributeFilter: ['class']
+            });
+            Utils.queryWithin(this.playerElement, this.menuSelector).forEach((menu) => this.observeMenu(menu));
+        },
+        observeMenu(menu) {
+            this.observer?.observe(menu, {
                 attributes: true,
                 attributeFilter: ['class', 'style', 'aria-hidden']
             });
@@ -984,8 +1012,7 @@
         isPlayerMenuOpen() {
             const fullscreenRoot = document.fullscreenElement;
             if (!fullscreenRoot) return false;
-            const selectors = '.ytp-settings-menu, .ytp-contextmenu, .ytp-popup.ytp-contextmenu, .ytp-panel-menu';
-            return [...fullscreenRoot.querySelectorAll(selectors)].some((element) => {
+            return [...fullscreenRoot.querySelectorAll(this.menuSelector)].some((element) => {
                 const style = getComputedStyle(element);
                 return element.getClientRects().length > 0
                     && style.display !== 'none'
