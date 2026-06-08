@@ -924,7 +924,7 @@
             }
             const clock = document.createElement('div');
             clock.id = 'yt-enhancer-clock';
-            clock.style.cssText = `position: fixed !important; pointer-events: none !important; z-index: 2147483647 !important; font-family: "Roboto", sans-serif !important; font-weight: 400 !important; padding: 6px 14px !important; text-shadow: 0 1px 3px rgba(0,0,0,0.8) !important; display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.3) !important; transition: bottom 0.18s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s !important; will-change: bottom !important;`;
+            clock.style.cssText = `position: fixed !important; pointer-events: none !important; z-index: 2147483647 !important; font-family: "Roboto", sans-serif !important; font-weight: 400 !important; padding: 6px 14px !important; text-shadow: 0 1px 3px rgba(0,0,0,0.8) !important; display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.3) !important; transition: transform 0.18s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s !important; will-change: transform !important;`;
             (document.fullscreenElement || document.documentElement).appendChild(clock);
             this.clockElement = clock;
             this.updateStyle();
