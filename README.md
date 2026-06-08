@@ -3,7 +3,7 @@
 > **Optimize, customize, and take control of your YouTube experience.**<br>
 > **Otimize, personalize e domine sua experiência no YouTube.**
 
-![Version](https://img.shields.io/badge/Version-2.4.0-blue)
+![Version](https://img.shields.io/badge/Version-2.5.0-blue)
 ![Language](https://img.shields.io/badge/Language-JavaScript-F7DF1E?logo=javascript&logoColor=F7DF1E)
 ![Author](https://img.shields.io/badge/Author-John%20Wiliam%20%26%20IA-orange)
 [![Install](https://img.shields.io/badge/Install-Click_Here-green)](https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js)
@@ -21,18 +21,20 @@ YouTube Enhancer is a userscript for **Violentmonkey** that improves YouTube's l
 1. **🎨 Grid Layout Control**
    - Choose how many videos appear per row (**3 to 8**).
    - Includes responsive behavior for smaller screens.
+   - Applies through persistent CSS variables without rebuilding styles on every SPA navigation.
 
 2. **🚫 Shorts Removal**
    - Removes Shorts shelves, menu entries, and Shorts-style listings.
 
 3. **🧹 Remove “Most Relevant”**
    - Removes the “Most relevant” shelf from the **Subscriptions** page when enabled.
-   - Reacts to YouTube's SPA navigation and restores the shelf immediately when disabled.
+   - Reacts immediately to progressively hydrated shelves and restores the shelf when disabled.
 
 4. **⏰ Floating Clock (Fullscreen)**
    - Displays the time over fullscreen video playback.
    - Automatically hides while player settings and context menus are open, so it does not cover quality, speed, or other options.
    - Supports adjustable text color, background color, opacity, size, margin, and border radius.
+   - Tracks every player-controls visibility transition in fullscreen, not only the first one.
    - The default background is `#000000` with `0.3` opacity.
 
 ### ⚙️ Settings Panel
@@ -57,7 +59,7 @@ No code editing is required:
 - GM API (`GM_getValue`, `GM_setValue`, `GM_registerMenuCommand`)
 - Dynamic CSS injection
 - Mutation observers for YouTube SPA updates
-- DOM caching and lifecycle cleanup
+- DOM caching, frame-coalesced updates, scoped observers, and lifecycle cleanup
 
 ### 📝 Credits
 
@@ -74,18 +76,20 @@ O YouTube Enhancer é um userscript para **Violentmonkey** que melhora o layout,
 1. **🎨 Controle de Layout Grid**
    - Permite escolher quantos vídeos aparecem por linha (**3 a 8**).
    - Inclui comportamento responsivo em telas menores.
+   - Aplica-se por variáveis CSS persistentes, sem reconstruir estilos a cada navegação SPA.
 
 2. **🚫 Remoção de Shorts**
    - Remove prateleiras, entradas de menu e listagens do tipo Shorts.
 
 3. **🧹 Remover “Mais relevantes”**
    - Remove a prateleira “Mais relevantes” da página de **Inscrições** quando a opção está ativa.
-   - Acompanha a navegação SPA do YouTube e restaura a prateleira imediatamente quando a opção é desativada.
+   - Reage imediatamente às prateleiras hidratadas progressivamente e restaura o conteúdo quando a opção é desativada.
 
 4. **⏰ Relógio Flutuante (Tela Cheia)**
    - Exibe a hora sobre o vídeo em tela cheia.
    - Oculta-se automaticamente enquanto menus de configuração ou de contexto do player estão abertos, sem cobrir resolução, velocidade ou outras opções.
    - Permite ajustar cor do texto, cor do fundo, opacidade, tamanho, margem e arredondamento.
+   - Acompanha todas as transições de visibilidade dos controles em tela cheia, não apenas a primeira.
    - O fundo padrão é `#000000`, com opacidade `0,3`.
 
 ### ⚙️ Painel de Configurações
@@ -110,7 +114,7 @@ Não é necessário editar o código:
 - API GM (`GM_getValue`, `GM_setValue`, `GM_registerMenuCommand`)
 - Injeção dinâmica de CSS
 - Observadores de mutação para atualizações da SPA do YouTube
-- Cache de DOM e limpeza de ciclo de vida
+- Cache de DOM, atualizações agrupadas por frame, observadores delimitados e limpeza de ciclo de vida
 
 ### 📝 Créditos
 

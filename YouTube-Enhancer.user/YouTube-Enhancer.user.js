@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      2.4.0
+// @version      2.5.0
 // @description  Personaliza o layout, remove elementos indesejados e adiciona um relógio em tela cheia.
 // @author       John Wiliam & IA
 // @match        *://*.youtube.com/*
@@ -19,7 +19,7 @@
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = '2.4.0';
+    const SCRIPT_VERSION = '2.5.0';
     const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
     if (window[FLAG]) return;
     window[FLAG] = true;
@@ -85,20 +85,28 @@
             safe.FEATURES.FULLSCREEN_CLOCK = this.toBoolean(safe.FEATURES.FULLSCREEN_CLOCK, defaults.FEATURES.FULLSCREEN_CLOCK);
             return safe;
         },
-        debounce(func, wait) {
-            let timeout = null;
-            const debounced = function(...args) {
-                clearTimeout(timeout);
-                timeout = setTimeout(() => {
-                    timeout = null;
-                    func.apply(this, args);
-                }, wait);
+        scheduleFrame(func) {
+            let frameId = null;
+            let latestArgs = [];
+            const schedule = (...args) => {
+                latestArgs = args;
+                if (frameId !== null) return;
+                frameId = requestAnimationFrame(() => {
+                    frameId = null;
+                    func(...latestArgs);
+                });
             };
-            debounced.cancel = () => {
-                clearTimeout(timeout);
-                timeout = null;
+            schedule.cancel = () => {
+                if (frameId !== null) cancelAnimationFrame(frameId);
+                frameId = null;
+                latestArgs = [];
             };
-            return debounced;
+            return schedule;
+        },
+        queryIncludingRoot(root, selector) {
+            if (!(root instanceof Element) && root !== document) return [];
+            const matches = root instanceof Element && root.matches(selector) ? [root] : [];
+            return matches.concat([...root.querySelectorAll(selector)]);
         },
         DOMCache: {
             cache: new Map(),
@@ -183,10 +191,10 @@
     };
 
     const ConfigManager = {
-        CONFIG_VERSION: '2.4.0',
+        CONFIG_VERSION: '2.5.0',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
-            version: '2.4.0', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
+            version: '2.5.0', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
             FEATURES: { LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, REMOVE_RELEVANT: true, FULLSCREEN_CLOCK: true },
             CLOCK_STYLE: { color: '#ffffff', bgColor: '#000000', bgOpacity: 0.3, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
@@ -194,7 +202,7 @@
             try {
                 const saved = GM_getValue(this.STORAGE_KEY);
                 return Utils.sanitizeConfig(Utils.migrateConfig(saved, this.CONFIG_VERSION) || {}, this.defaults);
-            } catch (e) { return Utils.sanitizeConfig({}, this.defaults); }
+            } catch { return Utils.sanitizeConfig({}, this.defaults); }
         },
         save(config) {
             try {
@@ -203,7 +211,7 @@
                 GM_setValue(this.STORAGE_KEY, sanitized);
                 EventBus.emit('configChanged', sanitized);
                 return true;
-            } catch (e) { return false; }
+            } catch { return false; }
         }
     };
 
@@ -231,7 +239,7 @@
             const callback = () => this.open('menu');
 
             try { GM_registerMenuCommand(label, callback, { id: 'yt-enhancer-settings-cmd', autoClose: true }); } 
-            catch (error) { try { GM_registerMenuCommand(label, callback); } catch (e) {} }
+            catch { try { GM_registerMenuCommand(label, callback); } catch {} }
         },
         registerSafeApi() {
             if (this.apiRegistered) return;
@@ -545,25 +553,32 @@
     const StyleManager = {
         styleId: 'yt-enhancer-styles',
         cleanupFunctions: [],
+        appliedSignature: null,
         init() {
-            this.cleanupFunctions.push(
-                EventBus.on('configChanged', (config) => this.apply(config)),
-                Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.apply(ConfigManager.load()))
-            );
+            this.cleanupFunctions.push(EventBus.on('configChanged', (config) => this.apply(config)));
         },
         apply(config) {
+            const signature = JSON.stringify({
+                layout: config.FEATURES.LAYOUT_ENHANCEMENT,
+                videosPerRow: config.VIDEOS_PER_ROW,
+                shorts: config.FEATURES.SHORTS_REMOVAL
+            });
+            if (signature === this.appliedSignature && document.getElementById(this.styleId)) return;
+
             let css = '';
             if (config.FEATURES.LAYOUT_ENHANCEMENT) {
-                css += `ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${config.VIDEOS_PER_ROW} !important; } @media (max-width: 1200px) { ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${Math.min(config.VIDEOS_PER_ROW, 4)} !important; } }`;
+                const compactRows = Math.min(config.VIDEOS_PER_ROW, 4);
+                css += `ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${config.VIDEOS_PER_ROW} !important; } @media (max-width: 1200px) { ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${compactRows} !important; } }`;
             }
             if (config.FEATURES.SHORTS_REMOVAL) {
                 css += `ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]), ytd-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]), ytd-mini-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]) { display: none !important; }`;
             }
-            Utils.injectCSS(css, this.styleId);
+            if (Utils.injectCSS(css, this.styleId)) this.appliedSignature = signature;
         },
         cleanup() {
             this.cleanupFunctions.forEach((cleanup) => cleanup());
             this.cleanupFunctions = [];
+            this.appliedSignature = null;
             document.getElementById(this.styleId)?.remove();
         }
     };
@@ -578,11 +593,10 @@
         hiddenElements: new Set(),
         previousDisplay: new WeakMap(),
         enabled: false,
-        debouncedPrune: null,
+        pendingRoots: new Set(),
+        scheduledPrune: null,
         init(config) {
-            this.debouncedPrune = Utils.debounce(() => {
-                if (this.enabled) this.prune();
-            }, 250);
+            this.scheduledPrune = Utils.scheduleFrame(() => this.flushPendingRoots());
             this.eventCleanup = EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
             this.updateConfig(config);
         },
@@ -595,27 +609,49 @@
         },
         start() {
             if (!document.documentElement) return;
-            this.prune();
+            this.pruneRoots([document]);
             if (!this.observer) {
-                this.observer = new MutationObserver(() => this.debouncedPrune());
+                this.observer = new MutationObserver((records) => this.queueMutationRoots(records));
                 const targetNode = document.querySelector('ytd-app') || document.body;
                 if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
             }
             if (this.listenersCleanup.length === 0) {
+                const queueDocument = () => this.queueRoot(document);
                 this.listenersCleanup.push(
-                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune())
+                    Utils.safeAddEventListener(document, 'yt-navigate-finish', queueDocument),
+                    Utils.safeAddEventListener(document, 'yt-page-data-updated', queueDocument),
+                    Utils.safeAddEventListener(window, 'popstate', queueDocument)
                 );
             }
         },
         stop() {
             this.observer?.disconnect();
             this.observer = null;
-            this.debouncedPrune?.cancel();
+            this.scheduledPrune?.cancel();
+            this.pendingRoots.clear();
             this.listenersCleanup.forEach((cleanup) => cleanup());
             this.listenersCleanup = [];
             this.restoreHiddenElements();
+        },
+        queueMutationRoots(records) {
+            if (!this.enabled) return;
+            for (const record of records) {
+                for (const node of record.addedNodes) {
+                    if (node instanceof Element) this.pendingRoots.add(node);
+                }
+            }
+            if (this.pendingRoots.size) this.scheduledPrune();
+        },
+        queueRoot(root) {
+            if (!this.enabled) return;
+            this.pendingRoots.add(root);
+            this.scheduledPrune();
+        },
+        flushPendingRoots() {
+            if (!this.enabled || this.pendingRoots.size === 0) return;
+            const roots = [...this.pendingRoots];
+            this.pendingRoots.clear();
+            this.pruneRoots(roots);
         },
         markHidden(element) {
             if (!(element instanceof HTMLElement) || this.hiddenElements.has(element)) return;
@@ -640,7 +676,7 @@
             }
             this.hiddenElements.clear();
         },
-        prune() {
+        pruneRoots(roots) {
             for (const element of this.hiddenElements) {
                 if (!element.isConnected) {
                     this.hiddenElements.delete(element);
@@ -650,24 +686,26 @@
             if (!this.enabled) return;
 
             const elementsToHide = new Set();
-            document.querySelectorAll('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach((shelf) => {
-                elementsToHide.add(shelf.closest('ytd-rich-section-renderer') || shelf);
-            });
-            document.querySelectorAll('ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach((marker) => {
-                const item = marker.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer');
-                if (item) elementsToHide.add(item);
-            });
-            document.querySelectorAll('a[href="/shorts"], a[href^="/shorts/"]').forEach((link) => {
-                const item = link.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item, ytd-reel-item-renderer, ytd-rich-item-renderer');
-                if (item) elementsToHide.add(item);
-            });
+            for (const root of roots) {
+                Utils.queryIncludingRoot(root, 'ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach((shelf) => {
+                    elementsToHide.add(shelf.closest('ytd-rich-section-renderer') || shelf);
+                });
+                Utils.queryIncludingRoot(root, 'ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach((marker) => {
+                    const item = marker.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer');
+                    if (item) elementsToHide.add(item);
+                });
+                Utils.queryIncludingRoot(root, 'a[href="/shorts"], a[href^="/shorts/"]').forEach((link) => {
+                    const item = link.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item, ytd-reel-item-renderer, ytd-rich-item-renderer');
+                    if (item) elementsToHide.add(item);
+                });
+            }
             elementsToHide.forEach((element) => this.markHidden(element));
         },
         cleanup() {
             this.stop();
             this.eventCleanup?.();
             this.eventCleanup = null;
-            this.debouncedPrune = null;
+            this.scheduledPrune = null;
         }
     };
 
@@ -681,10 +719,8 @@
         hiddenElements: new Set(),
         previousDisplay: new WeakMap(),
         enabled: false,
-        debouncedPrune: null,
         relevantTitles: new Set(['most relevant', 'mais relevantes']),
         init(config) {
-            this.debouncedPrune = Utils.debounce(() => this.prune(), 250);
             this.eventCleanup = EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
             this.updateConfig(config);
         },
@@ -697,27 +733,44 @@
         },
         start() {
             if (!document.documentElement) return;
-            this.prune();
+            this.pruneRoots([document]);
             if (!this.observer) {
-                this.observer = new MutationObserver(() => this.debouncedPrune());
+                this.observer = new MutationObserver((records) => this.handleMutations(records));
                 const targetNode = document.querySelector('ytd-app') || document.body;
-                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
+                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true, characterData: true });
             }
             if (this.listenersCleanup.length === 0) {
+                const pruneDocument = () => this.pruneRoots([document]);
                 this.listenersCleanup.push(
-                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune())
+                    Utils.safeAddEventListener(document, 'yt-navigate-finish', pruneDocument),
+                    Utils.safeAddEventListener(document, 'yt-page-data-updated', pruneDocument),
+                    Utils.safeAddEventListener(window, 'popstate', pruneDocument)
                 );
             }
         },
         stop() {
             this.observer?.disconnect();
             this.observer = null;
-            this.debouncedPrune?.cancel();
             this.listenersCleanup.forEach((cleanup) => cleanup());
             this.listenersCleanup = [];
             this.restoreHiddenElements();
+        },
+        handleMutations(records) {
+            if (!this.enabled || location.pathname !== '/feed/subscriptions') return;
+            const roots = new Set();
+            for (const record of records) {
+                if (record.type === 'characterData') {
+                    const shelf = record.target.parentElement?.closest('ytd-rich-shelf-renderer');
+                    if (shelf) roots.add(shelf);
+                    continue;
+                }
+                for (const node of record.addedNodes) {
+                    const element = node instanceof Element ? node : node.parentElement;
+                    if (!element) continue;
+                    roots.add(element.closest('ytd-rich-shelf-renderer') || element);
+                }
+            }
+            if (roots.size) this.pruneRoots([...roots]);
         },
         normalizeTitle(value) {
             return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
@@ -755,7 +808,7 @@
             }
             this.hiddenElements.clear();
         },
-        prune() {
+        pruneRoots(roots) {
             for (const element of this.hiddenElements) {
                 if (!element.isConnected) {
                     this.hiddenElements.delete(element);
@@ -767,16 +820,16 @@
                 return;
             }
 
-            document.querySelectorAll('ytd-rich-shelf-renderer').forEach((shelf) => {
-                if (!this.isRelevantShelf(shelf)) return;
-                this.markHidden(shelf.closest('ytd-rich-section-renderer') || shelf);
-            });
+            for (const root of roots) {
+                Utils.queryIncludingRoot(root, 'ytd-rich-shelf-renderer').forEach((shelf) => {
+                    if (this.isRelevantShelf(shelf)) this.markHidden(shelf.closest('ytd-rich-section-renderer') || shelf);
+                });
+            }
         },
         cleanup() {
             this.stop();
             this.eventCleanup?.();
             this.eventCleanup = null;
-            this.debouncedPrune = null;
         }
     };
 
@@ -793,12 +846,13 @@
         fullscreenHandler: null,
         navigationHandler: null,
         eventCleanup: null,
+        menuSelector: '.ytp-settings-menu, .ytp-contextmenu, .ytp-popup.ytp-contextmenu, .ytp-panel-menu',
         init(config) {
             this.config = config;
-            this.observerCallback = Utils.debounce(() => {
+            this.observerCallback = Utils.scheduleFrame(() => {
                 this.adjustPosition();
                 this.refreshVisibility();
-            }, 100);
+            });
             this.eventCleanup = EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
             this.fullscreenHandler = () => this.handleFullscreen();
             this.navigationHandler = () => {
@@ -843,7 +897,7 @@
             }
             const clock = document.createElement('div');
             clock.id = 'yt-enhancer-clock';
-            clock.style.cssText = `position: fixed !important; pointer-events: none !important; z-index: 2147483647 !important; font-family: "Roboto", sans-serif !important; font-weight: 400 !important; padding: 6px 14px !important; text-shadow: 0 1px 3px rgba(0,0,0,0.8) !important; display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.3) !important; transition: bottom 0.3s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s !important;`;
+            clock.style.cssText = `position: fixed !important; pointer-events: none !important; z-index: 2147483647 !important; font-family: "Roboto", sans-serif !important; font-weight: 400 !important; padding: 6px 14px !important; text-shadow: 0 1px 3px rgba(0,0,0,0.8) !important; display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.3) !important; transition: bottom 0.2s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s !important;`;
             (document.fullscreenElement || document.documentElement).appendChild(clock);
             this.clockElement = clock;
             this.updateStyle();
@@ -854,30 +908,50 @@
                 fullscreenRoot.appendChild(this.clockElement);
             }
         },
-        setupObserver() {
+        setupObserver(includeMenus = Boolean(document.fullscreenElement)) {
             if (!this.playerElement || !this.config.FEATURES.FULLSCREEN_CLOCK) return;
             this.observer?.disconnect();
-            this.observer = new MutationObserver(() => this.observerCallback());
-            this.observer.observe(this.playerElement, {
+            this.observer = new MutationObserver((records) => {
+                if (records.some((record) => this.mutationAffectsClock(record))) this.observerCallback();
+            });
+            this.observer.observe(this.playerElement, includeMenus ? {
                 childList: true,
                 subtree: true,
                 attributes: true,
                 attributeFilter: ['class', 'style', 'aria-hidden']
+            } : {
+                attributes: true,
+                attributeFilter: ['class']
             });
         },
+        mutationAffectsClock(record) {
+            const target = record.target instanceof Element ? record.target : record.target.parentElement;
+            if (!target || target === this.clockElement || this.clockElement?.contains(target)) return false;
+            if (record.type === 'attributes') {
+                return target === this.playerElement || target.matches(this.menuSelector) || Boolean(target.closest(this.menuSelector));
+            }
+            if (target.matches(this.menuSelector) || target.closest(this.menuSelector)) return true;
+            return [...record.addedNodes, ...record.removedNodes].some((node) => (
+                node instanceof Element && (node.matches(this.menuSelector) || Boolean(node.querySelector(this.menuSelector)))
+            ));
+        },
         adjustPosition() {
-            if (!this.clockElement) return;
+            if (!this.clockElement || !document.fullscreenElement) return;
             if (!this.playerElement?.isConnected) this.resolvePlayerElement(true);
             if (!this.playerElement) return;
+
             const controlsVisible = !this.playerElement.classList.contains('ytp-autohide');
             const margin = this.config.CLOCK_STYLE.margin;
-            this.clockElement.style.bottom = `${controlsVisible ? margin + 110 : margin}px`;
+            const controls = this.playerElement.querySelector('.ytp-chrome-bottom');
+            const controlsHeight = controlsVisible && controls ? Math.ceil(controls.getBoundingClientRect().height) : 0;
+            const bottom = controlsVisible ? margin + Math.max(controlsHeight, 48) + 12 : margin;
+            const nextBottom = `${bottom}px`;
+            if (this.clockElement.style.bottom !== nextBottom) this.clockElement.style.bottom = nextBottom;
         },
         isPlayerMenuOpen() {
             const fullscreenRoot = document.fullscreenElement;
             if (!fullscreenRoot) return false;
-            const selectors = '.ytp-settings-menu, .ytp-contextmenu, .ytp-popup.ytp-contextmenu, .ytp-panel-menu';
-            return [...fullscreenRoot.querySelectorAll(selectors)].some((element) => {
+            return [...fullscreenRoot.querySelectorAll(this.menuSelector)].some((element) => {
                 const style = getComputedStyle(element);
                 return element.getClientRects().length > 0
                     && style.display !== 'none'
@@ -890,7 +964,8 @@
             const shouldShow = Boolean(this.config?.FEATURES?.FULLSCREEN_CLOCK
                 && document.fullscreenElement
                 && !this.isPlayerMenuOpen());
-            this.clockElement.style.display = shouldShow ? 'block' : 'none';
+            const nextDisplay = shouldShow ? 'block' : 'none';
+            if (this.clockElement.style.display !== nextDisplay) this.clockElement.style.display = nextDisplay;
         },
         updateStyle() {
             if (!this.clockElement) return;
@@ -929,6 +1004,7 @@
             }
             if (!this.playerElement?.isConnected) this.resolvePlayerElement(true);
             if (document.fullscreenElement) {
+                this.setupObserver(true);
                 if (!this.clockElement) this.createClock();
                 this.ensureClockMount();
                 this.updateStyle();
@@ -936,6 +1012,7 @@
                 this.refreshVisibility();
                 this.scheduleTimeUpdate();
             } else {
+                this.setupObserver(false);
                 this.clockElement?.remove();
                 this.clockElement = null;
                 clearTimeout(this.updateTimer);
@@ -1024,7 +1101,7 @@
         evaluate() {
             const hostnameAllowed = location.hostname === 'www.youtube.com';
             let isTopFrame = false;
-            try { isTopFrame = window === window.top; } catch (error) {}
+            try { isTopFrame = window === window.top; } catch {}
             const shouldInit = hostnameAllowed && isTopFrame;
             return { shouldInit };
         }
@@ -1033,6 +1110,7 @@
 
     if (BootstrapGate.evaluate().shouldInit) {
         SettingsLauncher.registerMenuCommand();
+        try { StyleManager.apply(ConfigManager.load()); } catch (error) { console.error('[YT Enhancer] Early styles failed:', error); }
         if (document.readyState === 'loading') {
             Utils.safeAddEventListener(document, 'DOMContentLoaded', () => {
                 SettingsLauncher.registerMenuCommand();
