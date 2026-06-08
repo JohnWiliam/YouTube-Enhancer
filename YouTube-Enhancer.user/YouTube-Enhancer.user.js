@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      2.4.0
+// @version      2.4.1
 // @description  Personaliza o layout, remove elementos indesejados e adiciona um relógio em tela cheia.
 // @author       John Wiliam & IA
 // @match        *://*.youtube.com/*
@@ -19,7 +19,7 @@
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = '2.4.0';
+    const SCRIPT_VERSION = '2.4.1';
     const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
     if (window[FLAG]) return;
     window[FLAG] = true;
@@ -99,6 +99,34 @@
                 timeout = null;
             };
             return debounced;
+        },
+        scheduleFrame(callback) {
+            let frameId = 0;
+            let pending = false;
+            const run = () => {
+                frameId = 0;
+                pending = false;
+                callback();
+            };
+            const scheduled = () => {
+                if (pending) return;
+                pending = true;
+                frameId = requestAnimationFrame(run);
+            };
+            scheduled.cancel = () => {
+                if (frameId) cancelAnimationFrame(frameId);
+                frameId = 0;
+                pending = false;
+            };
+            return scheduled;
+        },
+        getAppRoot() {
+            return document.querySelector('ytd-app, ytd-page-manager') || document.body || document.documentElement;
+        },
+        queryWithin(root, selector) {
+            if (!(root instanceof Element || root instanceof Document)) return [];
+            const matches = root instanceof Element && root.matches(selector) ? [root] : [];
+            return matches.concat([...root.querySelectorAll(selector)]);
         },
         DOMCache: {
             cache: new Map(),
@@ -183,10 +211,10 @@
     };
 
     const ConfigManager = {
-        CONFIG_VERSION: '2.4.0',
+        CONFIG_VERSION: '2.4.1',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
-            version: '2.4.0', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
+            version: '2.4.1', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
             FEATURES: { LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, REMOVE_RELEVANT: true, FULLSCREEN_CLOCK: true },
             CLOCK_STYLE: { color: '#ffffff', bgColor: '#000000', bgOpacity: 0.3, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
@@ -545,6 +573,7 @@
     const StyleManager = {
         styleId: 'yt-enhancer-styles',
         cleanupFunctions: [],
+        lastCss: null,
         init() {
             this.cleanupFunctions.push(
                 EventBus.on('configChanged', (config) => this.apply(config)),
@@ -559,11 +588,14 @@
             if (config.FEATURES.SHORTS_REMOVAL) {
                 css += `ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]), ytd-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]), ytd-mini-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]) { display: none !important; }`;
             }
+            if (css === this.lastCss && document.getElementById(this.styleId)) return;
+            this.lastCss = css;
             Utils.injectCSS(css, this.styleId);
         },
         cleanup() {
             this.cleanupFunctions.forEach((cleanup) => cleanup());
             this.cleanupFunctions = [];
+            this.lastCss = null;
             document.getElementById(this.styleId)?.remove();
         }
     };
@@ -577,12 +609,11 @@
         eventCleanup: null,
         hiddenElements: new Set(),
         previousDisplay: new WeakMap(),
+        pendingRoots: new Set(),
         enabled: false,
-        debouncedPrune: null,
+        scheduledPrune: null,
         init(config) {
-            this.debouncedPrune = Utils.debounce(() => {
-                if (this.enabled) this.prune();
-            }, 250);
+            this.scheduledPrune = Utils.scheduleFrame(() => this.flushPendingRoots());
             this.eventCleanup = EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
             this.updateConfig(config);
         },
@@ -595,27 +626,43 @@
         },
         start() {
             if (!document.documentElement) return;
-            this.prune();
+            this.queueRoot(Utils.getAppRoot());
             if (!this.observer) {
-                this.observer = new MutationObserver(() => this.debouncedPrune());
-                const targetNode = document.querySelector('ytd-app') || document.body;
-                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
+                this.observer = new MutationObserver((mutations) => {
+                    for (const mutation of mutations) {
+                        for (const node of mutation.addedNodes) this.queueRoot(node);
+                    }
+                });
+                this.observer.observe(Utils.getAppRoot(), { childList: true, subtree: true });
             }
             if (this.listenersCleanup.length === 0) {
+                const rescan = () => this.queueRoot(Utils.getAppRoot());
                 this.listenersCleanup.push(
-                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune())
+                    Utils.safeAddEventListener(document, 'yt-navigate-finish', rescan),
+                    Utils.safeAddEventListener(document, 'yt-page-data-updated', rescan),
+                    Utils.safeAddEventListener(window, 'popstate', rescan)
                 );
             }
         },
         stop() {
             this.observer?.disconnect();
             this.observer = null;
-            this.debouncedPrune?.cancel();
+            this.scheduledPrune?.cancel();
+            this.pendingRoots.clear();
             this.listenersCleanup.forEach((cleanup) => cleanup());
             this.listenersCleanup = [];
             this.restoreHiddenElements();
+        },
+        queueRoot(node) {
+            if (!this.enabled) return;
+            const root = node instanceof Element || node instanceof Document ? node : node?.parentElement;
+            if (!root) return;
+            for (const pendingRoot of this.pendingRoots) {
+                if (pendingRoot.contains(root)) return;
+                if (root.contains(pendingRoot)) this.pendingRoots.delete(pendingRoot);
+            }
+            this.pendingRoots.add(root);
+            this.scheduledPrune();
         },
         markHidden(element) {
             if (!(element instanceof HTMLElement) || this.hiddenElements.has(element)) return;
@@ -640,7 +687,7 @@
             }
             this.hiddenElements.clear();
         },
-        prune() {
+        flushPendingRoots() {
             for (const element of this.hiddenElements) {
                 if (!element.isConnected) {
                     this.hiddenElements.delete(element);
@@ -648,26 +695,26 @@
                 }
             }
             if (!this.enabled) return;
-
-            const elementsToHide = new Set();
-            document.querySelectorAll('ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach((shelf) => {
-                elementsToHide.add(shelf.closest('ytd-rich-section-renderer') || shelf);
+            const roots = [...this.pendingRoots];
+            this.pendingRoots.clear();
+            for (const root of roots) this.pruneRoot(root);
+        },
+        pruneRoot(root) {
+            Utils.queryWithin(root, 'ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach((shelf) => {
+                this.markHidden(shelf.closest('ytd-rich-section-renderer') || shelf);
             });
-            document.querySelectorAll('ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach((marker) => {
-                const item = marker.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer');
-                if (item) elementsToHide.add(item);
+            Utils.queryWithin(root, 'ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach((marker) => {
+                this.markHidden(marker.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer'));
             });
-            document.querySelectorAll('a[href="/shorts"], a[href^="/shorts/"]').forEach((link) => {
-                const item = link.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item, ytd-reel-item-renderer, ytd-rich-item-renderer');
-                if (item) elementsToHide.add(item);
+            Utils.queryWithin(root, 'a[href="/shorts"], a[href^="/shorts/"]').forEach((link) => {
+                this.markHidden(link.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item, ytd-reel-item-renderer, ytd-rich-item-renderer'));
             });
-            elementsToHide.forEach((element) => this.markHidden(element));
         },
         cleanup() {
             this.stop();
             this.eventCleanup?.();
             this.eventCleanup = null;
-            this.debouncedPrune = null;
+            this.scheduledPrune = null;
         }
     };
 
@@ -680,11 +727,12 @@
         eventCleanup: null,
         hiddenElements: new Set(),
         previousDisplay: new WeakMap(),
+        pendingRoots: new Set(),
         enabled: false,
-        debouncedPrune: null,
+        scheduledPrune: null,
         relevantTitles: new Set(['most relevant', 'mais relevantes']),
         init(config) {
-            this.debouncedPrune = Utils.debounce(() => this.prune(), 250);
+            this.scheduledPrune = Utils.scheduleFrame(() => this.flushPendingRoots());
             this.eventCleanup = EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
             this.updateConfig(config);
         },
@@ -697,27 +745,44 @@
         },
         start() {
             if (!document.documentElement) return;
-            this.prune();
+            this.queueRoot(Utils.getAppRoot());
             if (!this.observer) {
-                this.observer = new MutationObserver(() => this.debouncedPrune());
-                const targetNode = document.querySelector('ytd-app') || document.body;
-                if (targetNode) this.observer.observe(targetNode, { childList: true, subtree: true });
+                this.observer = new MutationObserver((mutations) => {
+                    for (const mutation of mutations) {
+                        if (mutation.type === 'characterData') this.queueRoot(mutation.target.parentElement);
+                        for (const node of mutation.addedNodes) this.queueRoot(node);
+                    }
+                });
+                this.observer.observe(Utils.getAppRoot(), { childList: true, subtree: true, characterData: true });
             }
             if (this.listenersCleanup.length === 0) {
+                const rescan = () => this.queueRoot(Utils.getAppRoot());
                 this.listenersCleanup.push(
-                    Utils.safeAddEventListener(document, 'yt-navigate-finish', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(document, 'yt-page-data-updated', () => this.debouncedPrune()),
-                    Utils.safeAddEventListener(window, 'popstate', () => this.debouncedPrune())
+                    Utils.safeAddEventListener(document, 'yt-navigate-finish', rescan),
+                    Utils.safeAddEventListener(document, 'yt-page-data-updated', rescan),
+                    Utils.safeAddEventListener(window, 'popstate', rescan)
                 );
             }
         },
         stop() {
             this.observer?.disconnect();
             this.observer = null;
-            this.debouncedPrune?.cancel();
+            this.scheduledPrune?.cancel();
+            this.pendingRoots.clear();
             this.listenersCleanup.forEach((cleanup) => cleanup());
             this.listenersCleanup = [];
             this.restoreHiddenElements();
+        },
+        queueRoot(node) {
+            const root = node instanceof Element || node instanceof Document ? node : node?.parentElement;
+            if (!root) return;
+            const scanRoot = root.closest?.('ytd-rich-shelf-renderer, ytd-rich-section-renderer') || root;
+            for (const pendingRoot of this.pendingRoots) {
+                if (pendingRoot.contains(scanRoot)) return;
+                if (scanRoot.contains(pendingRoot)) this.pendingRoots.delete(pendingRoot);
+            }
+            this.pendingRoots.add(scanRoot);
+            this.scheduledPrune();
         },
         normalizeTitle(value) {
             return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
@@ -726,7 +791,8 @@
             const titleSelectors = [
                 ':scope #rich-shelf-header #title',
                 ':scope #title-container > #title',
-                ':scope .rich-shelf-header #title'
+                ':scope .rich-shelf-header #title',
+                ':scope #title'
             ];
             return titleSelectors.some((selector) => [...shelf.querySelectorAll(selector)].some((title) => (
                 this.relevantTitles.has(this.normalizeTitle(title.textContent || ''))
@@ -755,7 +821,7 @@
             }
             this.hiddenElements.clear();
         },
-        prune() {
+        flushPendingRoots() {
             for (const element of this.hiddenElements) {
                 if (!element.isConnected) {
                     this.hiddenElements.delete(element);
@@ -764,10 +830,15 @@
             }
             if (!this.enabled || location.pathname !== '/feed/subscriptions') {
                 this.restoreHiddenElements();
+                this.pendingRoots.clear();
                 return;
             }
-
-            document.querySelectorAll('ytd-rich-shelf-renderer').forEach((shelf) => {
+            const roots = [...this.pendingRoots];
+            this.pendingRoots.clear();
+            for (const root of roots) this.pruneRoot(root);
+        },
+        pruneRoot(root) {
+            Utils.queryWithin(root, 'ytd-rich-shelf-renderer').forEach((shelf) => {
                 if (!this.isRelevantShelf(shelf)) return;
                 this.markHidden(shelf.closest('ytd-rich-section-renderer') || shelf);
             });
@@ -776,7 +847,7 @@
             this.stop();
             this.eventCleanup?.();
             this.eventCleanup = null;
-            this.debouncedPrune = null;
+            this.scheduledPrune = null;
         }
     };
 
@@ -792,13 +863,14 @@
         playerElement: null,
         fullscreenHandler: null,
         navigationHandler: null,
+        visibilityCleanup: null,
         eventCleanup: null,
         init(config) {
             this.config = config;
-            this.observerCallback = Utils.debounce(() => {
+            this.observerCallback = Utils.scheduleFrame(() => {
                 this.adjustPosition();
                 this.refreshVisibility();
-            }, 100);
+            });
             this.eventCleanup = EventBus.on('configChanged', (newConfig) => this.updateConfig(newConfig));
             this.fullscreenHandler = () => this.handleFullscreen();
             this.navigationHandler = () => {
@@ -814,12 +886,20 @@
             if (!this.config?.FEATURES?.FULLSCREEN_CLOCK) return null;
             const current = this.playerElement;
             if (!force && current?.isConnected) return current;
-            const player = Utils.DOMCache.get('#movie_player', force) || Utils.DOMCache.get('.html5-video-player', force);
+            const fullscreenPlayer = document.fullscreenElement?.matches?.('#movie_player, .html5-video-player')
+                ? document.fullscreenElement
+                : document.fullscreenElement?.querySelector?.('#movie_player, .html5-video-player');
+            const player = fullscreenPlayer || Utils.DOMCache.get('#movie_player', force) || Utils.DOMCache.get('.html5-video-player', force);
             if (player !== current) {
                 this.observer?.disconnect();
                 this.observer = null;
+                this.visibilityCleanup?.();
+                this.visibilityCleanup = null;
                 this.playerElement = player || null;
-                if (this.playerElement) this.setupObserver();
+                if (this.playerElement && document.fullscreenElement) {
+                    this.setupObserver();
+                    this.setupVisibilityListeners();
+                }
             } else if (!player) {
                 this.playerElement = null;
             }
@@ -843,7 +923,7 @@
             }
             const clock = document.createElement('div');
             clock.id = 'yt-enhancer-clock';
-            clock.style.cssText = `position: fixed !important; pointer-events: none !important; z-index: 2147483647 !important; font-family: "Roboto", sans-serif !important; font-weight: 400 !important; padding: 6px 14px !important; text-shadow: 0 1px 3px rgba(0,0,0,0.8) !important; display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.3) !important; transition: bottom 0.3s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s !important;`;
+            clock.style.cssText = `position: fixed !important; pointer-events: none !important; z-index: 2147483647 !important; font-family: "Roboto", sans-serif !important; font-weight: 400 !important; padding: 6px 14px !important; text-shadow: 0 1px 3px rgba(0,0,0,0.8) !important; display: none; box-shadow: 0 2px 10px rgba(0,0,0,0.3) !important; transition: bottom 0.18s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.2s !important; will-change: bottom !important;`;
             (document.fullscreenElement || document.documentElement).appendChild(clock);
             this.clockElement = clock;
             this.updateStyle();
@@ -865,13 +945,38 @@
                 attributeFilter: ['class', 'style', 'aria-hidden']
             });
         },
+        setupVisibilityListeners() {
+            if (!this.playerElement || this.visibilityCleanup) return;
+            const refresh = () => this.observerCallback();
+            const cleanups = [
+                Utils.safeAddEventListener(this.playerElement, 'mousemove', refresh, { passive: true }),
+                Utils.safeAddEventListener(this.playerElement, 'pointermove', refresh, { passive: true }),
+                Utils.safeAddEventListener(this.playerElement, 'touchstart', refresh, { passive: true }),
+                Utils.safeAddEventListener(this.playerElement, 'transitionend', refresh, { passive: true }),
+                Utils.safeAddEventListener(document, 'keydown', refresh, { passive: true, capture: true })
+            ];
+            this.visibilityCleanup = () => {
+                cleanups.forEach((cleanup) => cleanup());
+                this.visibilityCleanup = null;
+            };
+        },
+        areControlsVisible() {
+            if (!this.playerElement) return false;
+            if (!this.playerElement.classList.contains('ytp-autohide')) return true;
+            const controls = this.playerElement.querySelector('.ytp-chrome-bottom, .ytp-gradient-bottom');
+            if (!controls) return false;
+            const style = getComputedStyle(controls);
+            return controls.getClientRects().length > 0
+                && style.display !== 'none'
+                && style.visibility !== 'hidden'
+                && Number(style.opacity) > 0.05;
+        },
         adjustPosition() {
             if (!this.clockElement) return;
             if (!this.playerElement?.isConnected) this.resolvePlayerElement(true);
             if (!this.playerElement) return;
-            const controlsVisible = !this.playerElement.classList.contains('ytp-autohide');
             const margin = this.config.CLOCK_STYLE.margin;
-            this.clockElement.style.bottom = `${controlsVisible ? margin + 110 : margin}px`;
+            this.clockElement.style.bottom = `${this.areControlsVisible() ? margin + 110 : margin}px`;
         },
         isPlayerMenuOpen() {
             const fullscreenRoot = document.fullscreenElement;
@@ -927,25 +1032,25 @@
                 this.stopRuntime();
                 return;
             }
-            if (!this.playerElement?.isConnected) this.resolvePlayerElement(true);
             if (document.fullscreenElement) {
+                this.resolvePlayerElement(true);
                 if (!this.clockElement) this.createClock();
                 this.ensureClockMount();
+                this.setupObserver();
+                this.setupVisibilityListeners();
                 this.updateStyle();
                 this.updateTime();
                 this.refreshVisibility();
                 this.scheduleTimeUpdate();
             } else {
-                this.clockElement?.remove();
-                this.clockElement = null;
-                clearTimeout(this.updateTimer);
-                this.updateTimer = null;
+                this.stopRuntime();
             }
         },
         stopRuntime() {
             this.observer?.disconnect();
             this.observer = null;
             this.observerCallback?.cancel();
+            this.visibilityCleanup?.();
             clearTimeout(this.updateTimer);
             this.updateTimer = null;
             this.clockElement?.remove();
@@ -1033,6 +1138,7 @@
 
     if (BootstrapGate.evaluate().shouldInit) {
         SettingsLauncher.registerMenuCommand();
+        try { StyleManager.apply(ConfigManager.load()); } catch (error) { console.error('[YT Enhancer] Early style injection failed:', error); }
         if (document.readyState === 'loading') {
             Utils.safeAddEventListener(document, 'DOMContentLoaded', () => {
                 SettingsLauncher.registerMenuCommand();
