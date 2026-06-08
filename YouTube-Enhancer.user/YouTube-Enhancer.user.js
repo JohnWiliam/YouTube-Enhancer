@@ -1039,7 +1039,7 @@
                 this.resolvePlayerElement(true);
                 if (!this.clockElement) this.createClock();
                 this.ensureClockMount();
-                this.setupObserver();
+                if (!this.observer) this.setupObserver();
                 this.setupVisibilityListeners();
                 this.updateStyle();
                 this.updateTime();
