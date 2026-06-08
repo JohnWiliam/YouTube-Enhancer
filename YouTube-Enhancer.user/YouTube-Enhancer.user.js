@@ -749,8 +749,11 @@
             if (!this.observer) {
                 this.observer = new MutationObserver((mutations) => {
                     for (const mutation of mutations) {
-                        if (mutation.type === 'characterData') this.queueRoot(mutation.target.parentElement);
-                        for (const node of mutation.addedNodes) this.queueRoot(node);
+                        if (mutation.type === 'characterData') {
+                            this.queueRoot(mutation.target.parentElement);
+                        } else if (mutation.addedNodes.length > 0) {
+                            this.queueRoot(mutation.target);
+                        }
                     }
                 });
                 this.observer.observe(Utils.getAppRoot(), { childList: true, subtree: true, characterData: true });
