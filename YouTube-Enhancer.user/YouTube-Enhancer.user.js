@@ -953,8 +953,8 @@
                         menus.forEach((menu) => this.observeMenu(menu));
                         affectsClock = true;
                     }
-                    if (!affectsClock) {
-                        affectsClock = [...mutation.removedNodes].some((node) => (
+                    if (!affectsClock && mutation.removedNodes.length > 0) {
+                        affectsClock = Array.prototype.some.call(mutation.removedNodes, (node) => (
                             node instanceof Element
                             && (node.matches(this.menuSelector) || node.querySelector(this.menuSelector))
                         ));
