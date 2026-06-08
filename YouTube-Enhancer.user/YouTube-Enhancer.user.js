@@ -749,14 +749,10 @@
             if (!this.observer) {
                 this.observer = new MutationObserver((mutations) => {
                     for (const mutation of mutations) {
-                        if (mutation.type === 'characterData') {
-                            this.queueRoot(mutation.target.parentElement);
-                        } else if (mutation.addedNodes.length > 0) {
-                            this.queueRoot(mutation.target);
-                        }
+                        if (mutation.addedNodes.length > 0) this.queueRoot(mutation.target);
                     }
                 });
-                this.observer.observe(Utils.getAppRoot(), { childList: true, subtree: true, characterData: true });
+                this.observer.observe(Utils.getAppRoot(), { childList: true, subtree: true });
             }
             if (this.listenersCleanup.length === 0) {
                 const rescan = () => this.queueRoot(Utils.getAppRoot());
@@ -868,6 +864,7 @@
         navigationHandler: null,
         visibilityCleanup: null,
         eventCleanup: null,
+        menuSelector: '.ytp-settings-menu, .ytp-contextmenu, .ytp-popup.ytp-contextmenu, .ytp-panel-menu',
         init(config) {
             this.config = config;
             this.observerCallback = Utils.scheduleFrame(() => {
@@ -937,16 +934,44 @@
                 fullscreenRoot.appendChild(this.clockElement);
             }
         },
+        observeMenus(root) {
+            if (!this.observer || !(root instanceof Element)) return;
+            const menus = root.matches(this.menuSelector)
+                ? [root, ...root.querySelectorAll(this.menuSelector)]
+                : root.querySelectorAll(this.menuSelector);
+            for (const menu of menus) {
+                this.observer.observe(menu, {
+                    attributes: true,
+                    attributeFilter: ['class', 'style', 'aria-hidden']
+                });
+            }
+        },
+        observePlayerBranch(root) {
+            if (!this.observer || !(root instanceof Element)) return;
+            if (!root.matches(this.menuSelector)) {
+                this.observer.observe(root, { childList: true, subtree: true });
+            }
+            this.observeMenus(root);
+        },
         setupObserver() {
             if (!this.playerElement || !this.config.FEATURES.FULLSCREEN_CLOCK) return;
             this.observer?.disconnect();
-            this.observer = new MutationObserver(() => this.observerCallback());
+            this.observer = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    if (mutation.type !== 'childList') continue;
+                    for (const node of mutation.addedNodes) {
+                        if (mutation.target === this.playerElement) this.observePlayerBranch(node);
+                        else this.observeMenus(node);
+                    }
+                }
+                this.observerCallback();
+            });
             this.observer.observe(this.playerElement, {
                 childList: true,
-                subtree: true,
                 attributes: true,
-                attributeFilter: ['class', 'style', 'aria-hidden']
+                attributeFilter: ['class']
             });
+            for (const child of this.playerElement.children) this.observePlayerBranch(child);
         },
         setupVisibilityListeners() {
             if (!this.playerElement || this.visibilityCleanup) return;
@@ -984,8 +1009,7 @@
         isPlayerMenuOpen() {
             const fullscreenRoot = document.fullscreenElement;
             if (!fullscreenRoot) return false;
-            const selectors = '.ytp-settings-menu, .ytp-contextmenu, .ytp-popup.ytp-contextmenu, .ytp-panel-menu';
-            return [...fullscreenRoot.querySelectorAll(selectors)].some((element) => {
+            return [...fullscreenRoot.querySelectorAll(this.menuSelector)].some((element) => {
                 const style = getComputedStyle(element);
                 return element.getClientRects().length > 0
                     && style.display !== 'none'
