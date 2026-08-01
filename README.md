@@ -3,7 +3,7 @@
 > **Optimize, customize, and take control of your YouTube experience.**<br>
 > **Otimize, personalize e domine sua experiência no YouTube.**
 
-![Version](https://img.shields.io/badge/Version-2.4.1-blue)
+![Version](https://img.shields.io/badge/Version-2.5.0-blue)
 ![Language](https://img.shields.io/badge/Language-JavaScript-F7DF1E?logo=javascript&logoColor=F7DF1E)
 ![Author](https://img.shields.io/badge/Author-John%20Wiliam%20%26%20IA-orange)
 [![Install](https://img.shields.io/badge/Install-Click_Here-green)](https://github.com/JohnWiliam/YouTube-Enhancer/raw/refs/heads/main/YouTube-Enhancer.user/YouTube-Enhancer.user.js)
@@ -24,6 +24,7 @@ YouTube Enhancer is a userscript for **Violentmonkey** that improves YouTube's l
 
 2. **🚫 Shorts Removal**
    - Removes Shorts shelves, menu entries, and Shorts-style listings.
+   - Covers both legacy renderers and YouTube's newer view-model based shelves/cards.
 
 3. **🧹 Remove “Most Relevant”**
    - Removes the “Most relevant” shelf from the **Subscriptions** page when enabled.
@@ -57,6 +58,7 @@ No code editing is required:
 - GM API (`GM_getValue`, `GM_setValue`, `GM_registerMenuCommand`)
 - Dynamic CSS injection
 - Mutation observers for YouTube SPA updates
+- Automatic observer reconnection if YouTube replaces its application root
 - DOM caching and lifecycle cleanup
 
 ### 📝 Credits
@@ -77,6 +79,7 @@ O YouTube Enhancer é um userscript para **Violentmonkey** que melhora o layout,
 
 2. **🚫 Remoção de Shorts**
    - Remove prateleiras, entradas de menu e listagens do tipo Shorts.
+   - Abrange tanto renderizadores legados quanto as novas prateleiras/cartões baseados em view models do YouTube.
 
 3. **🧹 Remover “Mais relevantes”**
    - Remove a prateleira “Mais relevantes” da página de **Inscrições** quando a opção está ativa.
@@ -110,6 +113,7 @@ Não é necessário editar o código:
 - API GM (`GM_getValue`, `GM_setValue`, `GM_registerMenuCommand`)
 - Injeção dinâmica de CSS
 - Observadores de mutação para atualizações da SPA do YouTube
+- Reconexão automática dos observadores caso o YouTube substitua a raiz da aplicação
 - Cache de DOM e limpeza de ciclo de vida
 
 ### 📝 Créditos

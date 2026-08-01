@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         YouTube Enhancer
 // @namespace    Violentmonkey Scripts
-// @version      2.4.1
+// @version      2.5.0
 // @description  Personaliza o layout, remove elementos indesejados e adiciona um relógio em tela cheia.
 // @author       John Wiliam & IA
 // @match        *://*.youtube.com/*
@@ -19,7 +19,7 @@
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = '2.4.1';
+    const SCRIPT_VERSION = '2.5.0';
     const FLAG = `__yt_enhancer_v${SCRIPT_VERSION.replace(/\./g, '_')}__`;
     if (window[FLAG]) return;
     window[FLAG] = true;
@@ -211,10 +211,10 @@
     };
 
     const ConfigManager = {
-        CONFIG_VERSION: '2.4.1',
+        CONFIG_VERSION: '2.5.0',
         STORAGE_KEY: 'YT_ENHANCER_CONFIG',
         defaults: {
-            version: '2.4.1', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
+            version: '2.5.0', LANGUAGE: 'pt', VIDEOS_PER_ROW: 5,
             FEATURES: { LAYOUT_ENHANCEMENT: true, SHORTS_REMOVAL: true, REMOVE_RELEVANT: true, FULLSCREEN_CLOCK: true },
             CLOCK_STYLE: { color: '#ffffff', bgColor: '#000000', bgOpacity: 0.3, fontSize: 22, margin: 30, borderRadius: 25, position: 'bottom-right' }
         },
@@ -586,7 +586,7 @@
                 css += `ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${config.VIDEOS_PER_ROW} !important; } @media (max-width: 1200px) { ytd-rich-grid-renderer { --ytd-rich-grid-items-per-row: ${Math.min(config.VIDEOS_PER_ROW, 4)} !important; } }`;
             }
             if (config.FEATURES.SHORTS_REMOVAL) {
-                css += `ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]), ytd-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]), ytd-mini-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]) { display: none !important; }`;
+                css += `ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]), ytd-reel-shelf-renderer, grid-shelf-view-model:has(a[href^="/shorts/"]), shorts-lockup-view-model:has(a[href^="/shorts/"]), ytd-video-renderer:has(ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]), ytd-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]), ytd-mini-guide-entry-renderer:has(a[href="/shorts"], a[href^="/shorts/"]) { display: none !important; }`;
             }
             if (css === this.lastCss && document.getElementById(this.styleId)) return;
             this.lastCss = css;
@@ -605,6 +605,7 @@
     // =======================================================
     const ShortsManager = {
         observer: null,
+        observedRoot: null,
         listenersCleanup: [],
         eventCleanup: null,
         hiddenElements: new Set(),
@@ -626,27 +627,40 @@
         },
         start() {
             if (!document.documentElement) return;
-            this.queueRoot(Utils.getAppRoot());
-            if (!this.observer) {
-                this.observer = new MutationObserver((mutations) => {
-                    for (const mutation of mutations) {
-                        for (const node of mutation.addedNodes) this.queueRoot(node);
-                    }
-                });
-                this.observer.observe(Utils.getAppRoot(), { childList: true, subtree: true });
-            }
+            this.ensureObserverRoot();
+            this.queueRoot(this.observedRoot || Utils.getAppRoot());
             if (this.listenersCleanup.length === 0) {
-                const rescan = () => this.queueRoot(Utils.getAppRoot());
+                const rescan = () => {
+                    this.ensureObserverRoot();
+                    this.queueRoot(this.observedRoot || Utils.getAppRoot());
+                };
                 this.listenersCleanup.push(
+                    Utils.safeAddEventListener(document, 'yt-navigate-start', rescan),
                     Utils.safeAddEventListener(document, 'yt-navigate-finish', rescan),
                     Utils.safeAddEventListener(document, 'yt-page-data-updated', rescan),
                     Utils.safeAddEventListener(window, 'popstate', rescan)
                 );
             }
         },
+        ensureObserverRoot() {
+            const root = Utils.getAppRoot();
+            if (this.observer && this.observedRoot === root && root?.isConnected) return;
+            this.observer?.disconnect();
+            this.observer = null;
+            this.observedRoot = root || null;
+            if (this.observedRoot) {
+                this.observer = new MutationObserver((mutations) => {
+                    for (const mutation of mutations) {
+                        for (const node of mutation.addedNodes) this.queueRoot(node);
+                    }
+                });
+                this.observer.observe(this.observedRoot, { childList: true, subtree: true });
+            }
+        },
         stop() {
             this.observer?.disconnect();
             this.observer = null;
+            this.observedRoot = null;
             this.scheduledPrune?.cancel();
             this.pendingRoots.clear();
             this.listenersCleanup.forEach((cleanup) => cleanup());
@@ -700,14 +714,14 @@
             for (const root of roots) this.pruneRoot(root);
         },
         pruneRoot(root) {
-            Utils.queryWithin(root, 'ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts]').forEach((shelf) => {
+            Utils.queryWithin(root, 'ytd-reel-shelf-renderer, ytd-rich-shelf-renderer[is-shorts], grid-shelf-view-model:has(a[href^="/shorts/"])').forEach((shelf) => {
                 this.markHidden(shelf.closest('ytd-rich-section-renderer') || shelf);
             });
             Utils.queryWithin(root, 'ytd-thumbnail-overlay-time-status-renderer[overlay-style="SHORTS"]').forEach((marker) => {
                 this.markHidden(marker.closest('ytd-rich-item-renderer, ytd-video-renderer, ytd-grid-video-renderer, ytd-compact-video-renderer'));
             });
             Utils.queryWithin(root, 'a[href="/shorts"], a[href^="/shorts/"]').forEach((link) => {
-                this.markHidden(link.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item, ytd-reel-item-renderer, ytd-rich-item-renderer'));
+                this.markHidden(link.closest('ytd-guide-entry-renderer, ytd-mini-guide-entry-renderer, ytd-compact-link-renderer, tp-yt-paper-item, ytd-reel-item-renderer, ytd-rich-item-renderer, shorts-lockup-view-model'));
             });
         },
         cleanup() {
@@ -723,6 +737,7 @@
     // =======================================================
     const RelevantShelfManager = {
         observer: null,
+        observedRoot: null,
         listenersCleanup: [],
         eventCleanup: null,
         hiddenElements: new Set(),
@@ -745,27 +760,40 @@
         },
         start() {
             if (!document.documentElement) return;
-            this.queueRoot(Utils.getAppRoot());
-            if (!this.observer) {
-                this.observer = new MutationObserver((mutations) => {
-                    for (const mutation of mutations) {
-                        if (mutation.addedNodes.length > 0) this.queueRoot(mutation.target);
-                    }
-                });
-                this.observer.observe(Utils.getAppRoot(), { childList: true, subtree: true });
-            }
+            this.ensureObserverRoot();
+            this.queueRoot(this.observedRoot || Utils.getAppRoot());
             if (this.listenersCleanup.length === 0) {
-                const rescan = () => this.queueRoot(Utils.getAppRoot());
+                const rescan = () => {
+                    this.ensureObserverRoot();
+                    this.queueRoot(this.observedRoot || Utils.getAppRoot());
+                };
                 this.listenersCleanup.push(
+                    Utils.safeAddEventListener(document, 'yt-navigate-start', rescan),
                     Utils.safeAddEventListener(document, 'yt-navigate-finish', rescan),
                     Utils.safeAddEventListener(document, 'yt-page-data-updated', rescan),
                     Utils.safeAddEventListener(window, 'popstate', rescan)
                 );
             }
         },
+        ensureObserverRoot() {
+            const root = Utils.getAppRoot();
+            if (this.observer && this.observedRoot === root && root?.isConnected) return;
+            this.observer?.disconnect();
+            this.observer = null;
+            this.observedRoot = root || null;
+            if (this.observedRoot) {
+                this.observer = new MutationObserver((mutations) => {
+                    for (const mutation of mutations) {
+                        if (mutation.type === 'characterData' || mutation.addedNodes.length > 0) this.queueRoot(mutation.target);
+                    }
+                });
+                this.observer.observe(this.observedRoot, { childList: true, characterData: true, subtree: true });
+            }
+        },
         stop() {
             this.observer?.disconnect();
             this.observer = null;
+            this.observedRoot = null;
             this.scheduledPrune?.cancel();
             this.pendingRoots.clear();
             this.listenersCleanup.forEach((cleanup) => cleanup());
@@ -1016,12 +1044,22 @@
                 && style.visibility !== 'hidden'
                 && Number(style.opacity) > 0.05;
         },
+        getControlsClearance() {
+            if (!this.areControlsVisible()) return 0;
+            const controls = this.playerElement?.querySelector('.ytp-chrome-bottom');
+            const fullscreenRoot = document.fullscreenElement;
+            if (!controls || !fullscreenRoot) return 64;
+            const controlsRect = controls.getBoundingClientRect();
+            const rootRect = fullscreenRoot.getBoundingClientRect();
+            if (controlsRect.height <= 0 || rootRect.height <= 0) return 64;
+            return Utils.clamp(rootRect.bottom - controlsRect.top, 48, 180, 64);
+        },
         adjustPosition() {
             if (!this.clockElement) return;
             if (!this.playerElement?.isConnected) this.resolvePlayerElement(true);
             if (!this.playerElement) return;
             const margin = this.config.CLOCK_STYLE.margin;
-            this.clockElement.style.bottom = `${this.areControlsVisible() ? margin + 110 : margin}px`;
+            this.clockElement.style.bottom = `${margin + this.getControlsClearance()}px`;
         },
         isPlayerMenuOpen() {
             const fullscreenRoot = document.fullscreenElement;
